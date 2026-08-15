@@ -1,0 +1,6 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2>Delivered — #{{ order_number }}</h2>
+<p>Your order was delivered. We hope you enjoy it! Leave a review to help other customers.</p>
+<p><a href="{{ frontend_url }}/orders/{{ order_number }}/review">Write a review</a></p>
+{% endblock %}

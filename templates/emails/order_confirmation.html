@@ -1,0 +1,7 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2>Order confirmed — #{{ order_number }}</h2>
+<p>Thank you for your order! We're preparing it now.</p>
+<p><strong>Total:</strong> {{ total }} {{ currency }}</p>
+<p><a href="{{ frontend_url }}/orders/{{ order_number }}">View order</a></p>
+{% endblock %}

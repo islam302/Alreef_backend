@@ -1,0 +1,14 @@
+{
+  "name": "@alreef/frontend-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript API client for the Alreef e-commerce backend (/api/v1/).",
+  "main": "index.ts",
+  "types": "index.ts",
+  "peerDependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

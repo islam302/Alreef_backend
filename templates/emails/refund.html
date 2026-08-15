@@ -1,0 +1,5 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2>Refund processed — #{{ order_number }}</h2>
+<p>We've refunded {{ amount }} {{ currency }} to your original payment method / store credit.</p>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2>Payment failed — #{{ order_number }}</h2>
+<p>Your payment of {{ amount }} {{ currency }} could not be completed. You can retry from your order page.</p>
+<p><a href="{{ frontend_url }}/orders/{{ order_number }}">Retry payment</a></p>
+{% endblock %}
