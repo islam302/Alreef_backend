@@ -1,0 +1,45 @@
+# Line endings, decided by the repository rather than by each contributor's
+# `core.autocrlf`. The repository was already clean — every committed blob is LF
+# — but that held because the people committing happened to have autocrlf on. A
+# single contributor without it would have started committing CRLF, and nothing
+# would have complained until a shell script failed inside a Linux container.
+* text=auto eol=lf
+
+# Windows-only scripts genuinely need CRLF: cmd.exe and older PowerShell hosts
+# mis-parse a batch file that arrives with LF endings.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never CRLF, whatever the platform. A `#!/bin/sh` line ending in \r makes the
+# kernel look for an interpreter called "sh\r", and the error ("bad interpreter",
+# "no such file or directory" pointing at a file that plainly exists) sends
+# people hunting in the wrong place entirely.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+*.conf text eol=lf
+
+# `text=auto` above asks git to guess, and a wrong guess on a binary is not a
+# cosmetic problem: it rewrites bytes inside the file and corrupts it silently.
+# Naming them removes the guess.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.mp4 binary
+*.webm binary
+*.mov binary
+*.zip binary
+*.pdf binary
+*.sqlite3 binary
+
+# SVG is XML, so it diffs usefully as text — unlike the formats above.
+*.svg text eol=lf
