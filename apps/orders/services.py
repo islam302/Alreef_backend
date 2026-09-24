@@ -1,0 +1,200 @@
+import logging
+from datetime import timedelta
+
+from django.db import transaction
+from django.utils import timezone
+from djmoney.money import Money
+
+from apps.core.error_codes import ApplicationError, ErrorCodes
+from apps.orders.models import (
+    Order,
+    OrderStatus,
+    OrderStatusHistory,
+    ReturnItem,
+    ReturnPolicySettings,
+    ReturnRequest,
+    ReturnRequestStatus,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def generate_order_number() -> str:
+    today = timezone.now().strftime("%Y%m%d")
+    prefix = f"ORD-{today}-"
+    last = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number").first()
+    seq = int(last.order_number.rsplit("-", 1)[-1]) + 1 if last else 1
+    return f"{prefix}{seq:05d}"
+
+
+@transaction.atomic
+def transition_status(order: Order, new_status: str, *, changed_by=None, note: str = "") -> Order:
+    order = Order.objects.select_for_update().get(pk=order.pk)
+    if not order.can_transition_to(new_status):
+        raise ApplicationError(
+            ErrorCodes.ORDER_INVALID_TRANSITION,
+            f"Cannot move order from '{order.status}' to '{new_status}'.",
+        )
+
+    from_status = order.status
+    order.status = new_status
+
+    now = timezone.now()
+    if new_status == OrderStatus.CONFIRMED:
+        order.confirmed_at = now
+    elif new_status == OrderStatus.SHIPPED:
+        order.shipped_at = now
+    elif new_status == OrderStatus.DELIVERED:
+        order.delivered_at = now
+    elif new_status == OrderStatus.CANCELLED:
+        order.cancelled_at = now
+
+    order.save()
+    OrderStatusHistory.objects.create(order=order, from_status=from_status, to_status=new_status, changed_by=changed_by, note=note)
+    _dispatch_status_notification(order, new_status)
+
+    if new_status == OrderStatus.DELIVERED:
+        _collect_cash_on_delivery(order, collected_by=changed_by)
+
+    from apps.audit.models import AuditAction
+    from apps.audit.services import record
+
+    record(
+        actor=changed_by, action=AuditAction.STATUS_CHANGE, model_name="Order", object_id=order.order_number,
+        changes={"from": from_status, "to": new_status, "note": note},
+    )
+    return order
+
+
+@transaction.atomic
+def cancel_order(order: Order, *, reason: str, cancelled_by=None) -> Order:
+    if not order.can_cancel():
+        raise ApplicationError(ErrorCodes.ORDER_CANNOT_CANCEL, f"Order in status '{order.status}' cannot be cancelled.")
+
+    from apps.inventory.models import StockReservation, StockReservationStatus
+    from apps.inventory.services import release_reservation
+
+    for reservation in StockReservation.objects.filter(order=order, status=StockReservationStatus.ACTIVE):
+        release_reservation(reservation)
+
+    order = transition_status(order, OrderStatus.CANCELLED, changed_by=cancelled_by, note=reason)
+    order.cancel_reason = reason
+    order.save(update_fields=["cancel_reason"])
+    return order
+
+
+def _collect_cash_on_delivery(order: Order, *, collected_by=None):
+    """
+    Delivery is when a cash-on-delivery payment actually becomes ours.
+
+    Hooked to the status transition rather than to one dashboard button, so it
+    holds for every route that can mark an order delivered — the admin API, the
+    Django admin, and any courier integration added later. Nothing else in the
+    system may capture a COD payment.
+
+    Failures here are logged, never raised: the parcel *has* been delivered, and
+    refusing that fact because a bookkeeping step stumbled would leave the order
+    in a state that contradicts the physical world. An uncaptured COD payment is
+    visible in the dashboard and fixable; a delivery we refused to record is not.
+    """
+    from apps.payments.models import Payment, PaymentStatus
+
+    payment = (
+        Payment.objects.filter(order=order, provider="cod")
+        .exclude(status__in=[PaymentStatus.CANCELLED, PaymentStatus.FAILED])
+        .order_by("-created_at")
+        .first()
+    )
+    if payment is None or payment.status == PaymentStatus.CAPTURED:
+        return
+
+    from apps.payments.services import record_cod_collection
+
+    try:
+        record_cod_collection(
+            payment, collected_by=collected_by, note="Collected on delivery."
+        )
+    except Exception:
+        logger.exception(
+            "Order %s was delivered but its COD payment %s could not be marked collected.",
+            order.order_number,
+            payment.id,
+        )
+
+
+def _dispatch_status_notification(order: Order, new_status: str):
+    from apps.notifications.tasks import send_email_task
+
+    templates = {
+        OrderStatus.SHIPPED: ("order_shipped", "Your order has shipped", "order_shipped"),
+        OrderStatus.DELIVERED: ("order_delivered", "Your order was delivered", "order_delivered"),
+    }
+    entry = templates.get(new_status)
+    if not entry:
+        return
+    event, subject, template_name = entry
+    send_email_task.delay(
+        to=order.customer_email, subject=subject, template_name=template_name,
+        context={"order_number": order.order_number}, event=event, user_id=order.user_id,
+    )
+
+
+@transaction.atomic
+def create_return_request(*, order: Order, user, reason: str, description: str, order_item_quantities: dict) -> ReturnRequest:
+    """order_item_quantities: {order_item_id: quantity}"""
+    policy = ReturnPolicySettings.get_solo()
+
+    if order.status != OrderStatus.DELIVERED:
+        raise ApplicationError(ErrorCodes.ORDER_INVALID_TRANSITION, "Only delivered orders can be returned.")
+    if order.delivered_at and timezone.now() > order.delivered_at + timedelta(days=policy.return_window_days):
+        raise ApplicationError(ErrorCodes.ORDER_INVALID_TRANSITION, f"Return window of {policy.return_window_days} days has passed.")
+    if reason == "customer_change_of_mind" and not policy.allow_change_of_mind_returns:
+        raise ApplicationError(ErrorCodes.ORDER_INVALID_TRANSITION, "Change-of-mind returns are not accepted.")
+
+    return_request = ReturnRequest.objects.create(
+        order=order, user=user, reason=reason, description=description,
+        status=ReturnRequestStatus.REQUESTED if policy.require_approval else ReturnRequestStatus.APPROVED,
+    )
+    for order_item_id, quantity in order_item_quantities.items():
+        order_item = order.items.filter(pk=order_item_id).first()
+        if not order_item or quantity > order_item.quantity:
+            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, f"Invalid order item/quantity: {order_item_id}")
+        ReturnItem.objects.create(return_request=return_request, order_item=order_item, quantity=quantity)
+
+    transition_status(order, OrderStatus.RETURN_REQUESTED, changed_by=user, note=f"Return requested: {reason}")
+    return return_request
+
+
+@transaction.atomic
+def decide_return_request(*, return_request: ReturnRequest, approve: bool, decided_by, note: str = ""):
+    return_request.status = ReturnRequestStatus.APPROVED if approve else ReturnRequestStatus.REJECTED
+    return_request.resolution_note = note
+    return_request.save(update_fields=["status", "resolution_note"])
+
+    if not approve:
+        transition_status(return_request.order, OrderStatus.DELIVERED, changed_by=decided_by, note="Return request rejected")
+    return return_request
+
+
+@transaction.atomic
+def complete_return_and_refund(*, return_request: ReturnRequest, processed_by, destination="original_method"):
+    from apps.payments.services import create_refund
+
+    order = return_request.order
+    return_request.status = ReturnRequestStatus.ITEM_RECEIVED
+    return_request.save(update_fields=["status"])
+    order = transition_status(order, OrderStatus.RETURNED, changed_by=processed_by)
+
+    refund_amount = sum(
+        (item.order_item.unit_price * item.quantity for item in return_request.items.select_related("order_item")),
+        start=Money(0, order.currency),
+    )
+    payment = order.payments.order_by("-created_at").first()
+    if payment and refund_amount.amount > 0:
+        create_refund(payment=payment, amount=refund_amount, reason=f"Return #{return_request.id}", destination=destination)
+
+    new_status = OrderStatus.PARTIALLY_REFUNDED if refund_amount < order.grand_total else OrderStatus.REFUNDED
+    order = transition_status(order, new_status, changed_by=processed_by)
+    return_request.status = ReturnRequestStatus.REFUNDED
+    return_request.save(update_fields=["status"])
+    return return_request

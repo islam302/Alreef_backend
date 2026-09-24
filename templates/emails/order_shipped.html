@@ -1,0 +1,7 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2>Your order has shipped — #{{ order_number }}</h2>
+<p>Carrier: {{ carrier }}</p>
+<p>Tracking number: {{ tracking_number }}</p>
+<p><a href="{{ tracking_url }}">Track shipment</a></p>
+{% endblock %}

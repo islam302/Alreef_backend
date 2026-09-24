@@ -1,0 +1,7 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2>Welcome to {{ site_name }}!</h2>
+<p>Hi {{ first_name|default:"there" }},</p>
+<p>Thanks for creating an account. Start exploring our honey, dates, nuts and natural food selection.</p>
+<p><a href="{{ frontend_url }}">Browse products</a></p>
+{% endblock %}

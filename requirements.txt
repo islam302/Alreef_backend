@@ -1,0 +1,11 @@
+# Convenience entry point for local development: `pip install -r requirements.txt`
+# installs everything needed to run, test, and develop the project (base +
+# dev tools + test tools). Docker builds use requirements/production.txt
+# directly (see Dockerfile) and never touch this file.
+#
+# Layered source of truth lives in requirements/:
+#   base.txt         - runtime dependencies (Django, DRF, Celery, Pillow, ...)
+#   development.txt  - + debug toolbar, django-extensions, ipython, factories
+#   testing.txt       - + pytest, pytest-django, pytest-cov, model-bakery, freezegun
+#   production.txt   - base.txt only (no dev/test tooling in the deployed image)
+-r requirements/testing.txt
