@@ -570,4 +570,19 @@ API_DOCS_ENABLED = config("API_DOCS_ENABLED", default=DEBUG, cast=bool)
 SITE_NAME = config("SITE_NAME", default="Alreef")
 IDEMPOTENCY_KEY_TTL_SECONDS = config("IDEMPOTENCY_KEY_TTL_SECONDS", default=86400, cast=int)
 ABANDONED_CART_HOURS = config("ABANDONED_CART_HOURS", default=6, cast=int)
+
+# The most units of one variant a single cart line may hold. There was no ceiling
+# at all, which meant a cart happily accepted a two-billion-unit line, and
+# anything at or above 2**31 was refused by Postgres rather than by validation —
+# surfacing as a 500 instead of a 400. The cap is what the shop would actually
+# ship in one order, not what an integer column can hold.
+MAX_CART_ITEM_QUANTITY = config("MAX_CART_ITEM_QUANTITY", default=100, cast=int)
+
+# Bounds on the free-form `metadata` object accepted by the public event
+# tracker. It is unauthenticated, so without limits an anonymous caller could
+# store roughly a megabyte of arbitrary JSON per request — measured at 1,011,890
+# characters — and do it 60 times a minute per address.
+ANALYTICS_METADATA_MAX_CHARS = config("ANALYTICS_METADATA_MAX_CHARS", default=4000, cast=int)
+ANALYTICS_METADATA_MAX_KEYS = config("ANALYTICS_METADATA_MAX_KEYS", default=40, cast=int)
+ANALYTICS_METADATA_MAX_DEPTH = config("ANALYTICS_METADATA_MAX_DEPTH", default=3, cast=int)
 EXPIRATION_ALERT_DAYS = [7, 14, 30]

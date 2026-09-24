@@ -10,6 +10,7 @@ from apps.carts.serializers import (
     UpdateCartItemSerializer,
 )
 from apps.core.response import success_response
+from apps.core.schema import envelope
 
 
 @extend_schema(tags=["Cart"], responses=CartSerializer)
@@ -82,7 +83,16 @@ class CartApplyCouponView(APIView):
         return success_response(CartSerializer(cart).data, message="Coupon removed.")
 
 
-@extend_schema(tags=["Cart"], responses=CartSerializer)
+@extend_schema(
+    tags=["Cart"],
+    # POST with no body: the cart to merge is the one on the session.
+    request=None,
+    # Enveloped. This said `CartSerializer`, which described the payload
+    # without the {success, message, data, errors} wrapper every response
+    # actually carries, so a generated client would have looked for the cart
+    # one level too high.
+    responses=envelope(CartSerializer, name="CartMerge"),
+)
 class CartMergeView(APIView):
     """Called right after login with the anonymous session's cart id, per
     docs/frontend/README.md merge flow (spec §24).

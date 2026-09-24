@@ -1,7 +1,7 @@
 import logging
 from datetime import timedelta
 
-from django.db import transaction
+from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 from djmoney.money import Money
 
@@ -19,15 +19,71 @@ from apps.orders.models import (
 logger = logging.getLogger(__name__)
 
 
+ORDER_NUMBER_SEQUENCE = "orders_order_number_seq"
+
+# Retained as a last line of defence only. With `nextval()` allocating the
+# counter, a collision now requires somebody to have inserted an order number by
+# hand; it is not the normal path and must not be relied on as one.
+MAX_ORDER_NUMBER_ATTEMPTS = 3
+
+
 def generate_order_number() -> str:
-    today = timezone.now().strftime("%Y%m%d")
-    prefix = f"ORD-{today}-"
-    last = Order.objects.filter(order_number__startswith=prefix).order_by("-order_number").first()
-    seq = int(last.order_number.rsplit("-", 1)[-1]) + 1 if last else 1
-    return f"{prefix}{seq:05d}"
+    """
+    The next order number: ORD-YYYYMMDD-00001.
+
+    The counter comes from a database sequence, not from `MAX(order_number) + 1`.
+    That earlier read was the cause of a real outage class: two customers
+    checking out in the same second read the same highest number, and the second
+    INSERT died on the unique constraint, so one of them lost their order to a
+    500. A retry loop made it less likely without making it correct — under
+    ten-way simultaneity a thread can keep losing.
+
+    `nextval()` takes no lock, so concurrent checkouts never queue behind each
+    other, and it does not roll back, so no two callers can ever be handed the
+    same value.
+
+    What that costs, stated plainly: an abandoned checkout consumes a number, so
+    the series has gaps, and the counter is global rather than restarting daily.
+    The number keeps its shape, its length, its uniqueness and its ordering.
+
+    Postgres-specific, deliberately. This project targets Postgres everywhere —
+    migrations, health checks and the money fields already assume it.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT nextval('{ORDER_NUMBER_SEQUENCE}')")
+        seq = cursor.fetchone()[0]
+    return f"ORD-{timezone.now().strftime('%Y%m%d')}-{seq:05d}"
 
 
-@transaction.atomic
+def create_order_with_unique_number(**fields) -> Order:
+    """
+    Create an Order with a freshly allocated number.
+
+    The sequence makes a clash between two concurrent checkouts impossible, so
+    this wrapper exists for the one case it cannot cover: a number inserted
+    outside the sequence, by a fixture or by hand. Each attempt gets its own
+    savepoint, because an IntegrityError makes the transaction it happened in
+    unusable and the surrounding checkout has to survive to try again.
+    """
+    for attempt in range(MAX_ORDER_NUMBER_ATTEMPTS):
+        try:
+            with transaction.atomic():
+                return Order.objects.create(order_number=generate_order_number(), **fields)
+        except IntegrityError as exc:
+            # Specific on purpose. Any other constraint means something else is
+            # wrong, and looping over it would bury the real error.
+            if "order_number" not in str(exc):
+                raise
+            if attempt == MAX_ORDER_NUMBER_ATTEMPTS - 1:
+                logger.error(
+                    "order number allocation gave up after %s collisions; a number was "
+                    "probably inserted outside the sequence",
+                    MAX_ORDER_NUMBER_ATTEMPTS,
+                )
+                raise
+            logger.warning("order number collision outside the sequence, retrying (%s)", attempt + 1)
+
+
 def transition_status(order: Order, new_status: str, *, changed_by=None, note: str = "") -> Order:
     order = Order.objects.select_for_update().get(pk=order.pk)
     if not order.can_transition_to(new_status):

@@ -1,6 +1,6 @@
 from django.utils.translation import gettext_lazy as _
-from drf_spectacular.utils import extend_schema
-from rest_framework import permissions, viewsets
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import permissions, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.views import APIView
@@ -12,6 +12,7 @@ from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.frontend_links import frontend_url
 from apps.core.permissions import IsOwner
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.notifications.tasks import send_email_task, send_sms_task
 from apps.users import services
 from apps.users.models import Address
@@ -69,7 +70,10 @@ class LoginView(TokenObtainPairView):
         return success_response(serializer.validated_data, message="Login successful.")
 
 
-@extend_schema(tags=["Auth"], request=LogoutSerializer)
+@extend_schema(
+    tags=["Auth"], request=LogoutSerializer,
+    responses=envelope(name="Logout"),
+)
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "auth"
@@ -85,7 +89,21 @@ class LogoutView(APIView):
         return success_response(message="Logged out.")
 
 
-@extend_schema(tags=["Auth"])
+@extend_schema(
+    tags=["Auth"],
+    responses=envelope(
+        inline_serializer(
+            name="TokenPair",
+            fields={
+                "access": serializers.CharField(),
+                # Present because ROTATE_REFRESH_TOKENS is on: the old one is
+                # blacklisted and the client must store this in its place.
+                "refresh": serializers.CharField(required=False),
+            },
+        ),
+        name="TokenRefresh",
+    ),
+)
 class TokenRefreshView(BaseTokenRefreshView):
     permission_classes = [permissions.AllowAny]
     throttle_scope = "auth"
@@ -119,7 +137,10 @@ class MeView(RetrieveUpdateAPIView):
         return success_response(serializer.data, message="Profile updated.")
 
 
-@extend_schema(tags=["Auth"], request=ChangePasswordSerializer)
+@extend_schema(
+    tags=["Auth"], request=ChangePasswordSerializer,
+    responses=envelope(name="ChangePassword"),
+)
 class ChangePasswordView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "auth_confirm"
@@ -132,7 +153,10 @@ class ChangePasswordView(APIView):
         return success_response(message="Password changed.")
 
 
-@extend_schema(tags=["Auth"], request=PasswordResetRequestSerializer)
+@extend_schema(
+    tags=["Auth"], request=PasswordResetRequestSerializer,
+    responses=envelope(name="PasswordResetRequest"),
+)
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
     throttle_scope = "auth"
@@ -155,7 +179,10 @@ class PasswordResetRequestView(APIView):
         return success_response(message="If that email exists, a reset link has been sent.")
 
 
-@extend_schema(tags=["Auth"], request=PasswordResetConfirmSerializer)
+@extend_schema(
+    tags=["Auth"], request=PasswordResetConfirmSerializer,
+    responses=envelope(name="PasswordResetConfirm"),
+)
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
     throttle_scope = "auth_confirm"
@@ -167,7 +194,10 @@ class PasswordResetConfirmView(APIView):
         return success_response(message="Password has been reset.")
 
 
-@extend_schema(tags=["Auth"], request=EmailVerifyRequestSerializer)
+@extend_schema(
+    tags=["Auth"], request=EmailVerifyRequestSerializer,
+    responses=envelope(name="EmailVerifyRequest"),
+)
 class EmailVerifyRequestView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "auth"
@@ -184,7 +214,10 @@ class EmailVerifyRequestView(APIView):
         return success_response(message="Verification email sent.")
 
 
-@extend_schema(tags=["Auth"], request=EmailVerifyConfirmSerializer)
+@extend_schema(
+    tags=["Auth"], request=EmailVerifyConfirmSerializer,
+    responses=envelope(name="EmailVerifyConfirm"),
+)
 class EmailVerifyConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
     throttle_scope = "auth_confirm"
@@ -197,7 +230,10 @@ class EmailVerifyConfirmView(APIView):
         return success_response(message="Email verified.")
 
 
-@extend_schema(tags=["Auth"], request=PhoneVerifyRequestSerializer)
+@extend_schema(
+    tags=["Auth"], request=PhoneVerifyRequestSerializer,
+    responses=envelope(name="PhoneVerifyRequest"),
+)
 class PhoneVerifyRequestView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "auth"
@@ -213,7 +249,10 @@ class PhoneVerifyRequestView(APIView):
         return success_response(message="OTP sent.")
 
 
-@extend_schema(tags=["Auth"], request=PhoneVerifyConfirmSerializer)
+@extend_schema(
+    tags=["Auth"], request=PhoneVerifyConfirmSerializer,
+    responses=envelope(name="PhoneVerifyConfirm"),
+)
 class PhoneVerifyConfirmView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "auth_confirm"

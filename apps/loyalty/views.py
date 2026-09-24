@@ -4,6 +4,7 @@ from rest_framework.generics import ListAPIView
 from rest_framework.views import APIView
 
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.loyalty import services
 from apps.loyalty.models import LoyaltyTransaction
 from apps.loyalty.serializers import (
@@ -13,7 +14,7 @@ from apps.loyalty.serializers import (
 )
 
 
-@extend_schema(tags=["Loyalty"])
+@extend_schema(tags=["Loyalty"], responses=envelope(LoyaltyAccountSerializer, name="LoyaltyAccount"))
 class LoyaltyAccountView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -37,7 +38,7 @@ class LoyaltyTransactionListView(ListAPIView):
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
 
 
-@extend_schema(tags=["Loyalty"], request=LoyaltyRedeemSerializer)
+@extend_schema(tags=["Loyalty"], request=LoyaltyRedeemSerializer, responses=envelope(name="LoyaltyRedeem"))
 class LoyaltyRedeemView(APIView):
     """Preview/redeem points into a store-credit-equivalent discount value.
     Applying it to an order's checkout total is a frontend-selected step at

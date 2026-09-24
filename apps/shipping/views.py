@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.shipping.models import City, Governorate, Shipment
 from apps.shipping.serializers import (
     CitySerializer,
@@ -80,7 +81,7 @@ class ShippingQuoteView(APIView):
         return success_response(ShippingQuoteSerializer(quotes, many=True).data)
 
 
-@extend_schema(tags=["Shipping"])
+@extend_schema(tags=["Shipping"], responses=envelope(ShipmentTrackingSerializer, name="ShipmentTracking"))
 class ShipmentTrackingView(RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = "tracking_number"

@@ -5,6 +5,7 @@ from rest_framework.generics import ListAPIView, RetrieveUpdateAPIView
 from rest_framework.views import APIView
 
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.notifications.models import Notification, NotificationPreference
 from apps.notifications.serializers import NotificationPreferenceSerializer, NotificationSerializer
 
@@ -24,7 +25,11 @@ class NotificationListView(ListAPIView):
         return self.get_paginated_response(serializer.data)
 
 
-@extend_schema(tags=["Notifications"])
+@extend_schema(
+    # POST with no body: the action is the URL.
+    request=None,
+    tags=["Notifications"], responses=envelope(NotificationSerializer, name="NotificationMarkRead"),
+)
 class NotificationMarkReadView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

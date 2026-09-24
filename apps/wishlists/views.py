@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from apps.catalog.models import Product
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.wishlists.models import WishlistItem
 from apps.wishlists.serializers import WishlistAddSerializer, WishlistItemSerializer
 
@@ -22,7 +23,7 @@ class WishlistListView(ListAPIView):
         return success_response(self.get_serializer(self.get_queryset(), many=True).data)
 
 
-@extend_schema(tags=["Wishlist"], request=WishlistAddSerializer)
+@extend_schema(tags=["Wishlist"], request=WishlistAddSerializer, responses=envelope(WishlistItemSerializer, name="WishlistAdd"))
 class WishlistAddView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -36,7 +37,7 @@ class WishlistAddView(APIView):
         return success_response(WishlistItemSerializer(item).data, message="Added to wishlist.", status=201)
 
 
-@extend_schema(tags=["Wishlist"])
+@extend_schema(tags=["Wishlist"], responses=envelope(name="WishlistRemove"))
 class WishlistRemoveView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -47,7 +48,7 @@ class WishlistRemoveView(APIView):
         return success_response(message="Removed from wishlist.", status=204)
 
 
-@extend_schema(tags=["Wishlist"])
+@extend_schema(tags=["Wishlist"], responses=envelope(name="WishlistCheck"))
 class WishlistCheckView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from apps.catalog.models import Product
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.core.validators import validate_image_file
 from apps.reviews import services
 from apps.reviews.models import Review, ReviewImage
@@ -29,7 +30,7 @@ class ProductReviewListView(ListAPIView):
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
 
 
-@extend_schema(tags=["Reviews"], request=ReviewCreateSerializer)
+@extend_schema(tags=["Reviews"], request=ReviewCreateSerializer, responses=envelope(ReviewSerializer, name="ReviewCreate"))
 class ReviewCreateView(APIView):
     """
     Accepts either application/json or multipart/form-data. To attach
@@ -60,7 +61,11 @@ class ReviewCreateView(APIView):
         return success_response(ReviewSerializer(review).data, message="Review submitted for moderation.", status=201)
 
 
-@extend_schema(tags=["Reviews"])
+@extend_schema(
+    # POST with no body: the action is the URL.
+    request=None,
+    tags=["Reviews"], responses=envelope(ReviewSerializer, name="ReviewVoteHelpful"),
+)
 class ReviewVoteHelpfulView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

@@ -59,6 +59,7 @@ from apps.catalog.models import Product, ProductImage, ProductVariant
 from apps.categories.models import Category
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.coupons.models import Coupon
 from apps.inventory.models import Batch, InventoryItem, InventoryMovement
 from apps.inventory.services import get_expired_batches, get_or_create_item
@@ -693,7 +694,13 @@ class AdminPaymentViewSet(ReadOnlyEnvelopeViewSet):
         return success_response(AdminPaymentSerializer(payment).data, message=message)
 
 
-@extend_schema(tags=["Admin"])
+@extend_schema(
+    tags=["Admin"],
+    # A computed report rather than a model: one entry per payment method,
+    # naming for staff the exact setting that is empty on the ones that
+    # cannot be offered.
+    responses=envelope(name="AdminPaymentMethods"),
+)
 class AdminPaymentMethodsView(APIView):
     """
     GET /api/v1/admin-api/payment-methods/

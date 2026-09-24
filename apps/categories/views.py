@@ -10,6 +10,7 @@ from apps.categories.serializers import (
     CategoryTreeSerializer,
 )
 from apps.core.response import success_response
+from apps.core.schema import envelope
 
 
 @extend_schema(tags=["Categories"])
@@ -26,7 +27,7 @@ class CategoryListView(ListAPIView):
         return success_response(self.get_serializer(queryset, many=True).data)
 
 
-@extend_schema(tags=["Categories"])
+@extend_schema(tags=["Categories"], responses=envelope(CategoryTreeSerializer, many=True, name="CategoryTree"))
 class CategoryTreeView(APIView):
     permission_classes = [permissions.AllowAny]
 

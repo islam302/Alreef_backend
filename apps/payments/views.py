@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.idempotency import IdempotentRequestMixin
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.payments import config as payment_config
 from apps.payments import services
 from apps.payments.models import Payment
@@ -51,7 +52,7 @@ class PaymentMethodsView(APIView):
         return success_response(PaymentMethodSerializer(specs, many=True).data)
 
 
-@extend_schema(tags=["Payments"])
+@extend_schema(tags=["Payments"], responses=envelope(PaymentSerializer, name="Payment"))
 class PaymentDetailView(RetrieveAPIView):
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -65,7 +66,7 @@ class PaymentDetailView(RetrieveAPIView):
         return success_response(self.get_serializer(self.get_object()).data)
 
 
-@extend_schema(tags=["Payments"])
+@extend_schema(tags=["Payments"], responses=envelope(PaymentSerializer, name="PaymentStatus"))
 class PaymentStatusView(APIView):
     """
     GET /api/v1/payments/{id}/status/
@@ -104,7 +105,14 @@ class PaymentStatusView(APIView):
         return success_response(PaymentSerializer(payment).data)
 
 
-@extend_schema(tags=["Webhooks"])
+@extend_schema(
+    tags=["Webhooks"],
+    request=None,
+    # No envelope here: a provider gets a bare status code, deliberately. 200 for
+    # applied or duplicate, 202 for recorded-but-not-applied, 400 for a bad
+    # signature, 409 for a contradiction on amount or currency.
+    responses={200: None, 202: None, 400: None, 409: None},
+)
 class PaymentWebhookView(APIView):
     """
     POST /api/v1/payments/webhooks/{provider}/
@@ -162,7 +170,10 @@ class PaymentWebhookView(APIView):
         )
 
 
-@extend_schema(tags=["Payments"], request=RefundCreateSerializer)
+@extend_schema(
+    tags=["Payments"], request=RefundCreateSerializer,
+    responses=envelope(RefundSerializer, name="Refund"),
+)
 class RefundCreateView(IdempotentRequestMixin, APIView):
     """Staff-only. Amount-capped and audited in `services.create_refund`."""
 
@@ -191,7 +202,10 @@ class RefundCreateView(IdempotentRequestMixin, APIView):
         return success_response(RefundSerializer(refund).data, message="Refund recorded.", status=201)
 
 
-@extend_schema(tags=["Payments"])
+@extend_schema(
+    tags=["Payments"], request=None,
+    responses=envelope(PaymentSerializer, name="PaymentReconcile"),
+)
 class PaymentReconcileView(APIView):
     """
     POST /api/v1/payments/{id}/reconcile/
@@ -212,7 +226,10 @@ class PaymentReconcileView(APIView):
         return success_response(PaymentSerializer(payment).data, message="Reconciled with the provider.")
 
 
-@extend_schema(tags=["Payments"], request=ManualSettlementSerializer)
+@extend_schema(
+    tags=["Payments"], request=ManualSettlementSerializer,
+    responses=envelope(PaymentSerializer, name="ManualSettlement"),
+)
 class ManualSettlementView(APIView):
     """
     POST /api/v1/payments/{id}/settle/

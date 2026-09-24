@@ -497,8 +497,25 @@ def _reload_production(monkeypatch, tmp_path, **env):
     import decouple
 
     monkeypatch.setenv("DJANGO_SETTINGS_MODULE", "config.settings.production")
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
+
+    # Production refuses to boot without these rather than silently inheriting
+    # base.py's localhost defaults, so every caller needs them. Supplying them
+    # here keeps each test asserting the one thing it is about; the guards
+    # themselves are asserted by the tests below. Pass None to leave one unset
+    # and watch the boot fail.
+    required = {
+        "CORS_ALLOWED_ORIGINS": "https://alreef.test",
+        "CSRF_TRUSTED_ORIGINS": "https://alreef.test",
+        "FRONTEND_URL": "https://alreef.test",
+        "BACKEND_PUBLIC_URL": "https://api.alreef.test",
+        "EMAIL_BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "EMAIL_HOST": "smtp.alreef.test",
+    }
+    for key, value in {**required, **env}.items():
+        if value is None:
+            monkeypatch.delenv(key, raising=False)
+        else:
+            monkeypatch.setenv(key, value)
 
     monkeypatch.setattr(decouple, "config", decouple.AutoConfig(str(tmp_path)))
     base = importlib.import_module("config.settings.base")
@@ -535,6 +552,79 @@ def test_production_settings_are_hardened(monkeypatch, tmp_path):
     assert production.SIMPLE_JWT["BLACKLIST_AFTER_ROTATION"] is True
     assert production.SIMPLE_JWT["ALGORITHM"] == "HS256"
     assert production.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds() <= 60 * 60
+    # Persistent connections must be probed before reuse, or a database restart
+    # hands dead sockets to customers until every worker's pool cycles.
+    assert production.DATABASES["default"]["CONN_HEALTH_CHECKS"] is True
+    assert production.DATABASES["default"]["CONN_MAX_AGE"] > 0
+    # Authentication is a Bearer header; cross-origin credentials buy nothing and
+    # only widen what a mis-set origin list would expose.
+    assert production.CORS_ALLOW_CREDENTIALS is False
+
+
+@pytest.mark.parametrize(
+    "missing", ["CORS_ALLOWED_ORIGINS", "CSRF_TRUSTED_ORIGINS", "FRONTEND_URL", "BACKEND_PUBLIC_URL"]
+)
+def test_production_refuses_to_boot_on_an_inherited_localhost_default(monkeypatch, tmp_path, missing):
+    """
+    Each of these falls back to localhost in base.py. That is right for a
+    developer and wrong for a deployment: FRONTEND_URL builds the links inside
+    password-reset and verification emails, so the default mailed customers a
+    link to their own machine — and nothing failed, which is what made it
+    dangerous.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+
+    with pytest.raises(ImproperlyConfigured) as exc:
+        _reload_production(
+            monkeypatch, tmp_path,
+            SECRET_KEY="a-real-random-production-key-for-this-test",
+            ALLOWED_HOSTS="alreef.test",
+            **{missing: None},
+        )
+    assert missing in str(exc.value)
+
+
+def test_production_refuses_a_mail_backend_that_cannot_send(monkeypatch, tmp_path):
+    """
+    The console backend was reaching production, which broke account recovery
+    outright and wrote single-use reset links into the container logs.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+
+    with pytest.raises(ImproperlyConfigured) as exc:
+        _reload_production(
+            monkeypatch, tmp_path,
+            SECRET_KEY="a-real-random-production-key-for-this-test",
+            ALLOWED_HOSTS="alreef.test",
+            EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend",
+        )
+    assert "does not send mail" in str(exc.value)
+
+
+def test_a_non_sending_backend_is_allowed_only_when_asked_for_by_name(monkeypatch, tmp_path):
+    """CI and smoke stacks legitimately send nothing; they have to say so."""
+    production = _reload_production(
+        monkeypatch, tmp_path,
+        SECRET_KEY="a-real-random-production-key-for-this-test",
+        ALLOWED_HOSTS="alreef.test",
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        ALLOW_UNSENDABLE_EMAIL_BACKEND="True",
+    )
+    assert "locmem" in production.EMAIL_BACKEND
+
+
+def test_production_refuses_smtp_without_a_host(monkeypatch, tmp_path):
+    """Otherwise the failure lands on a customer at send time, not at boot."""
+    from django.core.exceptions import ImproperlyConfigured
+
+    with pytest.raises(ImproperlyConfigured) as exc:
+        _reload_production(
+            monkeypatch, tmp_path,
+            SECRET_KEY="a-real-random-production-key-for-this-test",
+            ALLOWED_HOSTS="alreef.test",
+            EMAIL_HOST=None,
+        )
+    assert "EMAIL_HOST" in str(exc.value)
 
 
 def test_production_refuses_to_boot_on_the_placeholder_secret_key(monkeypatch, tmp_path):

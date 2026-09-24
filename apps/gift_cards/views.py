@@ -4,6 +4,7 @@ from rest_framework.generics import ListAPIView
 from rest_framework.views import APIView
 
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.gift_cards import services
 from apps.gift_cards.models import StoreCreditTransaction
 from apps.gift_cards.serializers import (
@@ -14,7 +15,7 @@ from apps.gift_cards.serializers import (
 )
 
 
-@extend_schema(tags=["Gift Cards"], request=GiftCardCheckSerializer)
+@extend_schema(tags=["Gift Cards"], request=GiftCardCheckSerializer, responses=envelope(GiftCardPublicSerializer, name="GiftCardCheck"))
 class GiftCardCheckView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_scope = "gift_card"
@@ -26,7 +27,7 @@ class GiftCardCheckView(APIView):
         return success_response(GiftCardPublicSerializer(gift_card).data)
 
 
-@extend_schema(tags=["Gift Cards"])
+@extend_schema(tags=["Gift Cards"], responses=envelope(StoreCreditAccountSerializer, name="StoreCreditAccount"))
 class StoreCreditAccountView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

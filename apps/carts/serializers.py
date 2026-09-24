@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from apps.carts.models import Cart, CartItem
@@ -35,13 +36,36 @@ class CartSerializer(serializers.ModelSerializer):
         return sum(item.quantity for item in obj.items.all())
 
 
+def _validate_quantity(value):
+    """
+    One shared ceiling for both cart serializers.
+
+    Read from settings at call time rather than baked into `max_value` at import,
+    so a deployment can change it and a test can override it.
+
+    Both halves of this mattered. Without a ceiling the cart accepted a
+    two-billion-unit line and carried it into every totals calculation
+    downstream; and a quantity at or above 2**31 got past validation entirely and
+    was rejected by the integer column instead, which reached the customer as a
+    500 with `INTERNAL_ERROR` rather than a field error they could act on.
+    """
+    ceiling = settings.MAX_CART_ITEM_QUANTITY
+    if value > ceiling:
+        raise serializers.ValidationError(
+            f"At most {ceiling} of the same item per order. "
+            f"Please contact us for a larger quantity."
+        )
+    return value
+
+
 class AddCartItemSerializer(serializers.Serializer):
     variant_id = serializers.IntegerField()
-    quantity = serializers.IntegerField(min_value=1, default=1)
+    quantity = serializers.IntegerField(min_value=1, default=1, validators=[_validate_quantity])
 
 
 class UpdateCartItemSerializer(serializers.Serializer):
-    quantity = serializers.IntegerField(min_value=0)
+    # 0 is allowed here and means "remove this line".
+    quantity = serializers.IntegerField(min_value=0, validators=[_validate_quantity])
 
 
 class ApplyCouponSerializer(serializers.Serializer):

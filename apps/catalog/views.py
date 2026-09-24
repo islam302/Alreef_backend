@@ -11,6 +11,7 @@ from apps.catalog.models import Product, ProductStatus
 from apps.catalog.serializers import ProductDetailSerializer, ProductListSerializer
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+from apps.core.schema import envelope
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def _track_recently_viewed(request, product):
         logger.warning("recently-viewed tracking failed for product %s", product.pk, exc_info=True)
 
 
-@extend_schema(tags=["Products"])
+@extend_schema(tags=["Products"], responses=envelope(ProductListSerializer, many=True, name="RelatedProducts"))
 class RelatedProductsView(APIView):
     """Rule-based: same category, excluding self, featured first. Architecture
     supports swapping in ML-based recommendations later without changing the
@@ -115,7 +116,7 @@ class RelatedProductsView(APIView):
         return success_response(ProductListSerializer(related, many=True).data)
 
 
-@extend_schema(tags=["Products"])
+@extend_schema(tags=["Products"], responses=envelope(ProductListSerializer, many=True, name="RecentlyViewed"))
 class RecentlyViewedView(APIView):
     permission_classes = [permissions.AllowAny]
 

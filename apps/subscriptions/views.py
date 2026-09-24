@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from apps.catalog.models import ProductVariant
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.subscriptions import services
 from apps.subscriptions.models import Subscription, SubscriptionItem
 from apps.subscriptions.serializers import SubscriptionCreateSerializer, SubscriptionSerializer
@@ -25,7 +26,7 @@ class SubscriptionListView(ListAPIView):
         return success_response(self.get_serializer(self.get_queryset(), many=True).data)
 
 
-@extend_schema(tags=["Subscriptions"], request=SubscriptionCreateSerializer)
+@extend_schema(tags=["Subscriptions"], request=SubscriptionCreateSerializer, responses=envelope(SubscriptionSerializer, name="SubscriptionCreate"))
 class SubscriptionCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -72,7 +73,11 @@ def _get_subscription(request, pk):
     return subscription
 
 
-@extend_schema(tags=["Subscriptions"])
+@extend_schema(
+    # POST with no body: the action is the URL.
+    request=None,
+    tags=["Subscriptions"], responses=envelope(SubscriptionSerializer, name="SubscriptionPause"),
+)
 class SubscriptionPauseView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -81,7 +86,11 @@ class SubscriptionPauseView(APIView):
         return success_response(SubscriptionSerializer(subscription).data, message="Subscription paused.")
 
 
-@extend_schema(tags=["Subscriptions"])
+@extend_schema(
+    # POST with no body: the action is the URL.
+    request=None,
+    tags=["Subscriptions"], responses=envelope(SubscriptionSerializer, name="SubscriptionResume"),
+)
 class SubscriptionResumeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -90,7 +99,11 @@ class SubscriptionResumeView(APIView):
         return success_response(SubscriptionSerializer(subscription).data, message="Subscription resumed.")
 
 
-@extend_schema(tags=["Subscriptions"])
+@extend_schema(
+    # POST with no body: the action is the URL.
+    request=None,
+    tags=["Subscriptions"], responses=envelope(SubscriptionSerializer, name="SubscriptionCancel"),
+)
 class SubscriptionCancelView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

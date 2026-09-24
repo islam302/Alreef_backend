@@ -142,9 +142,32 @@ def create_order_from_cart(
     cannot produce a second charge: the Payment table has a unique constraint on
     it.
     """
+    from apps.carts.models import Cart
     from apps.inventory.services import reserve_stock
-    from apps.orders.services import generate_order_number
+    from apps.orders.services import create_order_with_unique_number
     from apps.shipping.models import ShippingMethod
+
+    # Take the cart under a row lock before anything reads it, and only accept
+    # one that is still OPEN.
+    #
+    # The three guards that already existed all key on the request rather than
+    # on the cart, and a second submission carrying a different Idempotency-Key
+    # walked past every one of them: the mixin's cache lock is keyed on the
+    # header, and Payment's unique constraint on `idempotency_key` only catches
+    # a repeat of the *same* key. Nothing re-read the cart's status, and it is
+    # set to CONVERTED at the end of this function — far too late to exclude a
+    # request that is already inside it.
+    #
+    # So one cart could become two orders: stock deducted twice, two COD
+    # liabilities, and later two payment intentions, for a customer who clicked
+    # once in two tabs. The cart is what is being spent, so the cart is what has
+    # to be serialised.
+    cart = Cart.objects.select_for_update().get(pk=cart.pk)
+    if cart.status != CartStatus.OPEN:
+        raise ApplicationError(
+            ErrorCodes.CART_ALREADY_CHECKED_OUT,
+            "This cart has already been checked out.",
+        )
 
     items = list(cart.items.select_related("variant__product").all())
     if not items:
@@ -156,8 +179,7 @@ def create_order_from_cart(
 
     shipping_method = ShippingMethod.objects.filter(pk=shipping_method_id).first() if shipping_method_id else None
 
-    order = Order.objects.create(
-        order_number=generate_order_number(),
+    order = create_order_with_unique_number(
         user=user,
         currency=cart.currency,
         customer_name=address.full_name,

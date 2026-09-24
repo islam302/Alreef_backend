@@ -42,6 +42,7 @@ class ErrorCodes:
     # Cart / checkout
     CART_EMPTY = "CART_EMPTY"
     CART_ITEM_NOT_FOUND = "CART_ITEM_NOT_FOUND"
+    CART_ALREADY_CHECKED_OUT = "CART_ALREADY_CHECKED_OUT"
     CHECKOUT_SESSION_EXPIRED = "CHECKOUT_SESSION_EXPIRED"
     ADDRESS_INVALID = "ADDRESS_INVALID"
     ADDRESS_NOT_FOUND = "ADDRESS_NOT_FOUND"
@@ -114,6 +115,9 @@ ERROR_STATUS_MAP = {
     ErrorCodes.NO_VALID_BATCH: 409,
     ErrorCodes.CART_EMPTY: 400,
     ErrorCodes.CART_ITEM_NOT_FOUND: 404,
+    # 409: the cart is real and so is the request; they simply describe a
+    # conversion that has already happened. A retry cannot succeed.
+    ErrorCodes.CART_ALREADY_CHECKED_OUT: 409,
     ErrorCodes.CHECKOUT_SESSION_EXPIRED: 410,
     ErrorCodes.ADDRESS_INVALID: 400,
     ErrorCodes.ADDRESS_NOT_FOUND: 404,

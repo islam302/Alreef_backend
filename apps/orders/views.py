@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.orders import services
 from apps.orders.models import Order, ReturnRequest
 from apps.orders.serializers import (
@@ -43,7 +44,7 @@ class OrderDetailView(RetrieveAPIView):
         return success_response(self.get_serializer(self.get_object()).data)
 
 
-@extend_schema(tags=["Orders"], request=OrderCancelSerializer)
+@extend_schema(tags=["Orders"], request=OrderCancelSerializer, responses=envelope(OrderDetailSerializer, name="OrderCancel"))
 class OrderCancelView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -57,7 +58,7 @@ class OrderCancelView(APIView):
         return success_response(OrderDetailSerializer(order).data, message="Order cancelled.")
 
 
-@extend_schema(tags=["Returns"], request=ReturnRequestCreateSerializer)
+@extend_schema(tags=["Returns"], request=ReturnRequestCreateSerializer, responses=envelope(ReturnRequestSerializer, name="ReturnRequestCreate"))
 class ReturnRequestCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

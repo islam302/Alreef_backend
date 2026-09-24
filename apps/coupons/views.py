@@ -3,11 +3,12 @@ from rest_framework import permissions
 from rest_framework.views import APIView
 
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.coupons.serializers import CouponPublicSerializer
 from apps.coupons.services import get_valid_coupon
 
 
-@extend_schema(tags=["Coupons"])
+@extend_schema(tags=["Coupons"], responses=envelope(CouponPublicSerializer, name="CouponValidate"))
 class CouponValidateView(APIView):
     """Lets the frontend preview a coupon's terms before applying it to the cart."""
 

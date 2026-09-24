@@ -143,6 +143,17 @@ jobs:
       # this job exists to check the real production settings module loads.
       SECRET_KEY: ci-only-not-a-real-key-0000000000000000
       ALLOWED_HOSTS: example.test,www.example.test
+      # production.py refuses to inherit base.py's localhost fallbacks for these.
+      # That refusal is itself a fix: FRONTEND_URL builds the links inside
+      # password-reset and verification emails, so the default mailed customers a
+      # link to their own machine and nothing complained. This job therefore has
+      # to state them, exactly as a real deployment must.
+      CORS_ALLOWED_ORIGINS: https://example.test
+      CSRF_TRUSTED_ORIGINS: https://example.test
+      FRONTEND_URL: https://example.test
+      BACKEND_PUBLIC_URL: https://api.example.test
+      EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+      EMAIL_HOST: smtp.example.test
       DB_NAME: alreef
       DB_USER: alreef
       DB_PASSWORD: alreef
@@ -219,6 +230,40 @@ jobs:
       - name: OpenAPI schema generates and validates
         run: python manage.py spectacular --file schema.yml --validate
 
+      - name: Every view is described, and typing gaps cannot grow
+        # The schema is the only machine-checkable contract between this API and
+        # two frontends. Thirty-seven views used to publish nothing at all — the
+        # whole payment surface among them — because a plain APIView with no
+        # serializer_class is skipped with a W002 and a build that is otherwise
+        # green. Nothing failed, so nobody looked.
+        #
+        # W002 (a view missing entirely) is now zero and stays zero. W001 (a
+        # SerializerMethodField whose type could not be resolved) is a lesser
+        # problem — the field is described, just not typed — so it is ratcheted
+        # rather than blocked, because guessing a return type would put a
+        # confident lie in the contract instead of an honest gap.
+        env:
+          MAX_UNTYPED_FIELDS: "41"
+        run: |
+          python manage.py check --deploy 2>&1 | tee check.log || true
+
+          missing=$(grep -c 'drf_spectacular.W002' check.log || true)
+          untyped=$(grep -c 'drf_spectacular.W001' check.log || true)
+          echo "views with no schema (W002):      $missing  (must be 0)"
+          echo "fields with no resolved type (W001): $untyped  (ceiling $MAX_UNTYPED_FIELDS)"
+
+          fail=0
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::$missing view(s) publish no OpenAPI schema. Give them a serializer_class, or @extend_schema(responses=envelope(...), request=None) — see apps/core/schema.py."
+            grep 'drf_spectacular.W002' check.log | sed 's/.*Error \[/  - /;s/\].*//' | sort -u
+            fail=1
+          fi
+          if [ "$untyped" -gt "$MAX_UNTYPED_FIELDS" ]; then
+            echo "::error::untyped schema fields rose to $untyped (ceiling $MAX_UNTYPED_FIELDS). Add a return type hint to the new get_* method, or lower the ceiling if you fixed some."
+            fail=1
+          fi
+          exit $fail
+
       - name: Upload schema
         uses: actions/upload-artifact@v4
         if: always()
@@ -274,6 +319,12 @@ jobs:
             -e SECRET_KEY=ci-only-not-a-real-key-0000000000000000 \
             -e ALLOWED_HOSTS=localhost \
             -e SECURE_SSL_REDIRECT=False \
+            -e CORS_ALLOWED_ORIGINS=http://localhost \
+            -e CSRF_TRUSTED_ORIGINS=http://localhost \
+            -e FRONTEND_URL=http://localhost \
+            -e BACKEND_PUBLIC_URL=http://localhost:8000 \
+            -e EMAIL_BACKEND=django.core.mail.backends.locmem.EmailBackend \
+            -e ALLOW_UNSENDABLE_EMAIL_BACKEND=True \
             -e DB_HOST=127.0.0.1 -e DB_NAME=x -e DB_USER=x -e DB_PASSWORD=x \
             -p 8000:8000 alreef-api:ci
           for i in $(seq 1 30); do
