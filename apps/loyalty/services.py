@@ -30,6 +30,17 @@ def award_points_for_order(order):
 
     account = get_or_create_account(order.user)
     account = LoyaltyAccount.objects.select_for_update().get(pk=account.pk)
+
+    # Order confirmation can run more than once for the same order — a
+    # cash-on-delivery order confirms at checkout and again when the cash is
+    # collected, and a gateway may re-deliver its webhook. Awarding again each
+    # time would hand out points the customer never earned, so the earning
+    # transaction is the idempotency record.
+    if LoyaltyTransaction.objects.filter(
+        account=account, order=order, transaction_type=LoyaltyTransactionType.EARN
+    ).exists():
+        return None
+
     expires_at = timezone.now() + timedelta(days=settings_row.points_expiry_days) if settings_row.points_expiry_days else None
 
     LoyaltyTransaction.objects.create(

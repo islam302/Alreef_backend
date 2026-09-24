@@ -86,4 +86,19 @@ def compute_discount(*, coupon: Coupon, items, subtotal: Money) -> Money:
 
 
 def record_usage(*, coupon: Coupon, user, order, discount_amount: Money):
-    CouponUsage.objects.create(coupon=coupon, user=user, order=order, discount_amount=discount_amount)
+    """
+    Record that this coupon was used on this order. Idempotent.
+
+    `create` here was a latent double-count: order confirmation is reachable
+    more than once for the same order (a cash-on-delivery order is confirmed at
+    checkout and again when the cash is collected, and a re-delivered gateway
+    webhook can confirm one too). Each extra row spent another unit of the
+    coupon's global limit and another of the customer's per-user limit, so a
+    code capped at 100 uses would die after fifty orders.
+    """
+    usage, _ = CouponUsage.objects.get_or_create(
+        coupon=coupon,
+        order=order,
+        defaults={"user": user, "discount_amount": discount_amount},
+    )
+    return usage

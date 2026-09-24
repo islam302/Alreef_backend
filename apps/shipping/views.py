@@ -23,6 +23,15 @@ class GovernorateListView(ListAPIView):
     permission_classes = [permissions.AllowAny]
     pagination_class = None
 
+    def list(self, request, *args, **kwargs):
+        # pagination_class = None is right for a fixed 27-row reference list,
+        # but the envelope is applied BY the pagination class, so turning it
+        # off returned a bare array and broke the contract every other
+        # endpoint keeps. The address form could not read the response, which
+        # left checkout unreachable against a real backend.
+        queryset = self.filter_queryset(self.get_queryset())
+        return success_response(self.get_serializer(queryset, many=True).data)
+
 
 @extend_schema(tags=["Shipping"], parameters=[OpenApiParameter("governorate", str, OpenApiParameter.QUERY)])
 class CityListView(ListAPIView):
@@ -36,6 +45,11 @@ class CityListView(ListAPIView):
         if governorate_code:
             qs = qs.filter(governorate__code=governorate_code)
         return qs
+
+    def list(self, request, *args, **kwargs):
+        # Same reason as GovernorateListView above.
+        queryset = self.filter_queryset(self.get_queryset())
+        return success_response(self.get_serializer(queryset, many=True).data)
 
 
 @extend_schema(

@@ -1,3 +1,14 @@
+# Backend CI.
+#
+# Extends the original tests workflow rather than replacing it: the test and
+# openapi-schema jobs are the ones that were already here, with the deployment
+# check, the security suites and a dependency audit added around them.
+#
+# Postgres 16 and Redis 7 match docker-compose.yml on purpose. The suite touches
+# both — `select_for_update` for stock reservations needs a real transactional
+# database, and the cache-backed idempotency keys need a real Redis — so SQLite
+# or a fake cache would pass while hiding the failures that matter.
+
 name: Tests
 
 on:
@@ -5,9 +16,23 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
+  # Lets cd.yml require this whole workflow as a gate before publishing, so an
+  # image is never pushed for a commit whose suite did not pass.
+  workflow_call:
+
+concurrency:
+  # A new push supersedes an in-flight run on the same ref. Saves runner time
+  # without ever cancelling a run on a different branch.
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
 
 jobs:
   test:
+    name: Test suite
     runs-on: ubuntu-latest
 
     services:
@@ -43,6 +68,8 @@ jobs:
       DB_USER: alreef
       DB_PASSWORD: alreef
       REDIS_URL: redis://localhost:6379/0
+      # A throwaway value for CI only. Production refuses to boot on the
+      # insecure default, which is checked in the deploy-check job below.
       SECRET_KEY: ci-test-secret-key
 
     steps:
@@ -51,7 +78,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
           cache-dependency-path: requirements/testing.txt
 
@@ -62,10 +89,39 @@ jobs:
         run: python manage.py check
 
       - name: Migrations are up to date
+        # Catches a model change committed without its migration. That is a
+        # deploy-time failure otherwise, and a silent one until something reads
+        # the column that does not exist.
         run: python manage.py makemigrations --check --dry-run
 
+      - name: Migrations apply from empty
+        # `pytest` creates the schema too, but only via the same code path every
+        # time. Running migrate against a clean database is what proves the
+        # migration chain itself still replays.
+        run: python manage.py migrate --noinput
+
       - name: Run test suite
-        run: pytest tests/ -v --cov=apps --cov-report=term-missing --cov-report=xml
+        run: pytest tests/ -q --cov=apps --cov-report=term-missing --cov-report=xml
+
+      - name: Payment layer tests
+        # Named separately so a failure here is legible in the run list: these
+        # cover money, webhook signature verification and idempotency.
+        run: pytest tests/test_payments.py tests/test_payments_providers.py
+             tests/test_payments_webhooks.py tests/test_payments_flows.py
+             tests/test_payments_command.py -q
+
+      - name: Authorization and security tests
+        run: pytest tests/test_security.py tests/test_security_authz.py -q
+
+      - name: Query-count budgets
+        # Guards the admin API against regrowing the N+1s that made the
+        # dashboard slow: these assert a page costs the same for 20 rows as 1.
+        run: pytest tests/test_admin_api_performance.py -q
+
+      - name: Payment configuration report
+        # Not a gate — no gateway is configured in CI — but it must not crash,
+        # and its output documents which methods a bare deployment can offer.
+        run: python manage.py check_payments
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -75,7 +131,56 @@ jobs:
           path: coverage.xml
           retention-days: 14
 
+  deploy-check:
+    name: Production settings
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      # Deliberately not the insecure default: production.py raises on that, and
+      # this job exists to check the real production settings module loads.
+      SECRET_KEY: ci-only-not-a-real-key-0000000000000000
+      ALLOWED_HOSTS: example.test,www.example.test
+      DB_NAME: alreef
+      DB_USER: alreef
+      DB_PASSWORD: alreef
+      DB_HOST: localhost
+      REDIS_URL: redis://localhost:6379/0
+      SECURE_SSL_REDIRECT: "True"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: requirements/production.txt
+      - run: pip install -r requirements/production.txt
+
+      - name: manage.py check --deploy
+        # `--fail-level ERROR` keeps drf-spectacular's schema warnings from
+        # failing the build while still failing on a real security misconfig.
+        run: python manage.py check --deploy --fail-level ERROR
+
+      - name: API docs are not exposed in production
+        # base.py computes API_DOCS_ENABLED from the environment's DEBUG, which
+        # is read before production.py forces it False. An environment carrying
+        # DEBUG=True once got DEBUG disabled but the full route map — admin
+        # endpoints included — left public. This asserts the fix holds.
+        env:
+          DEBUG: "True"
+        run: |
+          python - <<'PY'
+          import django, os
+          django.setup()
+          from django.conf import settings
+          assert settings.DEBUG is False, "production settings must force DEBUG off"
+          assert settings.API_DOCS_ENABLED is False, (
+              "API docs are exposed in production when the environment sets DEBUG=True"
+          )
+          print("DEBUG off and API docs closed, even with DEBUG=True in the environment")
+          PY
+
   openapi-schema:
+    name: OpenAPI schema
     runs-on: ubuntu-latest
     needs: test
     services:
@@ -103,9 +208,81 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
           cache-dependency-path: requirements/development.txt
       - run: pip install -r requirements/development.txt
+
       - name: OpenAPI schema generates and validates
-        run: python manage.py spectacular --file /tmp/schema.yml --validate
+        run: python manage.py spectacular --file schema.yml --validate
+
+      - name: Upload schema
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openapi-schema
+          path: schema.yml
+          retention-days: 14
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # Advisories are published independently of this repository, so a clean run
+    # today can fail tomorrow with no code change. It reports rather than blocks;
+    # the review gate is the table in SECURITY.md, which records what is
+    # accepted and why.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install pip-audit
+
+      - name: pip-audit against production requirements
+        run: pip-audit -r requirements/base.txt --progress-spinner off
+
+  docker:
+    name: Production image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: alreef-api:ci
+          build-args: REQUIREMENTS_FILE=requirements/production.txt
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: The image starts and answers its own healthcheck path
+        # A build that succeeds and an image that runs are different claims. This
+        # catches a missing system library or a bad CMD, which only appear at
+        # runtime — without needing a database, since /api/health/ reporting a
+        # failed backend still proves Django booted and is serving.
+        run: |
+          docker run -d --name api-smoke \
+            -e DJANGO_SETTINGS_MODULE=config.settings.production \
+            -e SECRET_KEY=ci-only-not-a-real-key-0000000000000000 \
+            -e ALLOWED_HOSTS=localhost \
+            -e SECURE_SSL_REDIRECT=False \
+            -e DB_HOST=127.0.0.1 -e DB_NAME=x -e DB_USER=x -e DB_PASSWORD=x \
+            -p 8000:8000 alreef-api:ci
+          for i in $(seq 1 30); do
+            code=$(docker exec api-smoke sh -c \
+              'curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/health/' || echo 000)
+            # 200 means every backend is up, 500 means Django is serving and
+            # telling us the database is not — both prove the image boots.
+            case "$code" in 200|500) echo "gunicorn is serving (HTTP $code)"; exit 0;; esac
+            sleep 2
+          done
+          echo "the image never served a response"; docker logs api-smoke; exit 1
+
+      - name: Container logs
+        if: always()
+        run: docker logs api-smoke 2>&1 | tail -40 || true

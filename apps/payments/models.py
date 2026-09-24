@@ -6,20 +6,49 @@ from apps.orders.models import PaymentMethodSnapshot as PaymentMethod
 
 
 class PaymentProviderCode(models.TextChoices):
+    """
+    The *settlement route* that holds the payment — not the method the customer
+    picked at checkout.
+
+    Three of them, and only one is a gateway:
+
+    * `paymob` — the one real gateway. Serves card and mobile wallet, and will
+      serve InstaPay when Paymob enables it, at which point it is a settings
+      change and not a code change.
+    * `instapay` — a bank transfer the customer makes themselves and a staff
+      member confirms. InstaPay publishes no merchant API (see
+      docs/payments/instapay.md), so there is nothing to call; this is a real
+      route, not a placeholder.
+    * `cod` — cash to the courier, confirmed on delivery.
+
+    `manual` covers a payment taken entirely outside the system (store credit, a
+    bank transfer outside InstaPay) and has no adapter.
+    """
+
     PAYMOB = "paymob", "Paymob"
-    FAWRY = "fawry", "Fawry"
-    VALU = "valu", "valU"
+    INSTAPAY = "instapay", "InstaPay transfer"
     COD = "cod", "Cash on delivery"
     MANUAL = "manual", "Manual / store credit"
 
 
 class PaymentStatus(models.TextChoices):
+    """
+    `CAPTURED` is this system's name for *paid*. The transitions between these
+    values are defined once, in apps/payments/state.py, and nothing may write
+    `Payment.status` without going through it.
+    """
+
     PENDING = "pending", "Pending"
+    # The customer has somewhere to go — a 3-D Secure page, a Paymob iframe, a
+    # InstaPay transfer to make from their own banking app — but has not paid yet.
+    REQUIRES_ACTION = "requires_action", "Requires customer action"
     AUTHORIZED = "authorized", "Authorized"
     CAPTURED = "captured", "Captured"
     FAILED = "failed", "Failed"
     CANCELLED = "cancelled", "Cancelled"
     EXPIRED = "expired", "Expired"
+    # A refund has been sent to the provider but not yet confirmed.
+    REFUND_PENDING = "refund_pending", "Refund pending"
     REFUNDED = "refunded", "Refunded"
     PARTIALLY_REFUNDED = "partially_refunded", "Partially refunded"
 
@@ -34,8 +63,17 @@ class Payment(BaseModel):
     status = models.CharField(max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)
 
     provider_reference = models.CharField(max_length=150, blank=True, db_index=True)
+    # The reference *we* issued (Paymob's special_reference; the order number a
+    # customer quotes on an InstaPay transfer). Webhook handling checks the
+    # provider quoted this back unchanged, so a correctly-signed event for
+    # somebody else's order cannot settle ours.
+    merchant_reference = models.CharField(max_length=64, blank=True, db_index=True)
     idempotency_key = models.CharField(max_length=128, blank=True, db_index=True)
     expires_at = models.DateTimeField(null=True, blank=True)
+
+    # Why the last attempt failed, in the provider's words, for the dashboard
+    # and for support. Never a raw provider payload.
+    failure_reason = models.CharField(max_length=500, blank=True)
 
     # Non-sensitive redirect/iframe/reference data only — never card numbers, CVV, or secrets.
     metadata = models.JSONField(default=dict, blank=True)
@@ -45,6 +83,18 @@ class Payment(BaseModel):
             models.Index(fields=["order", "status"]),
             models.Index(fields=["provider_reference"]),
             models.Index(fields=["idempotency_key"]),
+            models.Index(fields=["merchant_reference"]),
+        ]
+        constraints = [
+            # One payment per checkout idempotency key. The cache-backed
+            # mixin in apps/core/idempotency.py is the fast path; this is the
+            # one that still holds when the cache has been flushed, which is
+            # exactly when a retry would otherwise double-charge.
+            models.UniqueConstraint(
+                fields=["idempotency_key"],
+                condition=~models.Q(idempotency_key=""),
+                name="uniq_payment_idempotency_key",
+            ),
         ]
 
     def __str__(self):
@@ -98,8 +148,21 @@ class PaymentWebhookEvent(BaseModel):
     processed_at = models.DateTimeField(null=True, blank=True)
     payment = models.ForeignKey(Payment, on_delete=models.SET_NULL, null=True, blank=True, related_name="webhook_events")
 
+    # Kept even when no Payment matched, so an event we could not attribute is
+    # visible to staff instead of silently dropped.
+    provider_reference = models.CharField(max_length=150, blank=True)
+    # Why a signed, non-duplicate event was still not applied: unknown
+    # reference, amount mismatch, unmapped status, out-of-order arrival.
+    rejection_reason = models.CharField(max_length=255, blank=True)
+    # The provider's own timestamp for the event, when it sends one. Used to
+    # drop an event that describes an older state than the one we hold.
+    provider_event_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
-        indexes = [models.Index(fields=["provider", "processed"])]
+        indexes = [
+            models.Index(fields=["provider", "processed"]),
+            models.Index(fields=["provider_reference"]),
+        ]
 
 
 class RefundStatus(models.TextChoices):

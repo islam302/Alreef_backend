@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from django.db import transaction
@@ -14,6 +15,8 @@ from apps.orders.models import (
     ReturnRequest,
     ReturnRequestStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def generate_order_number() -> str:
@@ -50,6 +53,9 @@ def transition_status(order: Order, new_status: str, *, changed_by=None, note: s
     OrderStatusHistory.objects.create(order=order, from_status=from_status, to_status=new_status, changed_by=changed_by, note=note)
     _dispatch_status_notification(order, new_status)
 
+    if new_status == OrderStatus.DELIVERED:
+        _collect_cash_on_delivery(order, collected_by=changed_by)
+
     from apps.audit.models import AuditAction
     from apps.audit.services import record
 
@@ -75,6 +81,45 @@ def cancel_order(order: Order, *, reason: str, cancelled_by=None) -> Order:
     order.cancel_reason = reason
     order.save(update_fields=["cancel_reason"])
     return order
+
+
+def _collect_cash_on_delivery(order: Order, *, collected_by=None):
+    """
+    Delivery is when a cash-on-delivery payment actually becomes ours.
+
+    Hooked to the status transition rather than to one dashboard button, so it
+    holds for every route that can mark an order delivered — the admin API, the
+    Django admin, and any courier integration added later. Nothing else in the
+    system may capture a COD payment.
+
+    Failures here are logged, never raised: the parcel *has* been delivered, and
+    refusing that fact because a bookkeeping step stumbled would leave the order
+    in a state that contradicts the physical world. An uncaptured COD payment is
+    visible in the dashboard and fixable; a delivery we refused to record is not.
+    """
+    from apps.payments.models import Payment, PaymentStatus
+
+    payment = (
+        Payment.objects.filter(order=order, provider="cod")
+        .exclude(status__in=[PaymentStatus.CANCELLED, PaymentStatus.FAILED])
+        .order_by("-created_at")
+        .first()
+    )
+    if payment is None or payment.status == PaymentStatus.CAPTURED:
+        return
+
+    from apps.payments.services import record_cod_collection
+
+    try:
+        record_cod_collection(
+            payment, collected_by=collected_by, note="Collected on delivery."
+        )
+    except Exception:
+        logger.exception(
+            "Order %s was delivered but its COD payment %s could not be marked collected.",
+            order.order_number,
+            payment.id,
+        )
 
 
 def _dispatch_status_notification(order: Order, new_status: str):

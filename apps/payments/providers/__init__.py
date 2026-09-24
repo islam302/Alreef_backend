@@ -1,36 +1,56 @@
-from .base import PaymentProvider
-from .cod import CODPaymentProvider
+"""
+The settlement-route registry.
 
-__all__ = ["PaymentProvider", "get_payment_provider"]
+`get_payment_provider` takes the value in `Payment.provider`, not the method the
+customer chose. Three routes:
 
-_REGISTRY = {
-    "cod": CODPaymentProvider,
+* `paymob` — the one real gateway. Card and mobile wallet today; InstaPay too,
+  once Paymob enables it.
+* `instapay` — a bank transfer the customer makes and staff confirm. InstaPay
+  publishes no merchant API, so there is nothing to call.
+* `cod` — cash to the courier.
+
+Use `apps.payments.config.gateway_for_method` to get from a method to a route
+rather than guessing here.
+
+Adapters are imported lazily. Constructing one reads settings and raises if the
+route is disabled or half-configured, so importing them all at module load would
+make `import apps.payments` fail on any box without Paymob credentials — which is
+every development box and the whole test suite.
+"""
+from apps.payments.providers.base import PaymentProvider
+
+__all__ = ["PaymentProvider", "get_payment_provider", "GATEWAY_CODES"]
+
+#: Routes with a real adapter. `manage.py check_payments` reports on these.
+GATEWAY_CODES = ("cod", "instapay", "paymob")
+
+#: Routes that exist as model choices but have no adapter, with the reason. Kept
+#: explicit so the error names the actual situation instead of "unknown provider".
+_NO_ADAPTER = {
+    "manual": (
+        "'manual' records a payment taken entirely outside the system (store credit, a "
+        "bank transfer outside InstaPay) and has no adapter to call. Move its state with "
+        "the staff endpoints instead."
+    ),
 }
 
 
 def get_payment_provider(code: str) -> PaymentProvider:
-    if code in _REGISTRY:
-        return _REGISTRY[code]()
+    if code == "cod":
+        from apps.payments.providers.cod import CODPaymentProvider
 
+        return CODPaymentProvider()
+    if code == "instapay":
+        from apps.payments.providers.instapay import InstaPayPaymentProvider
+
+        return InstaPayPaymentProvider()
     if code == "paymob":
-        from .paymob import PaymobPaymentProvider
+        from apps.payments.providers.paymob import PaymobPaymentProvider
 
         return PaymobPaymentProvider()
-    if code == "fawry":
-        from .fawry import FawryPaymentProvider
 
-        return FawryPaymentProvider()
-    if code == "valu":
-        from .valu import ValuPaymentProvider
-
-        return ValuPaymentProvider()
-    if code == "sympl":
-        from .sympl import SymplPaymentProvider
-
-        return SymplPaymentProvider()
-    if code == "aman":
-        from .aman import AmanPaymentProvider
-
-        return AmanPaymentProvider()
-
-    raise NotImplementedError(f"Unknown or unconfigured payment provider '{code}'.")
+    reason = _NO_ADAPTER.get(code)
+    if reason:
+        raise NotImplementedError(reason)
+    raise NotImplementedError(f"Unknown payment route '{code}'.")

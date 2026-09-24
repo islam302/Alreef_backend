@@ -100,7 +100,12 @@ HTTP status: `400`.
 | `PAYMENT_FAILED` | 402 | Provider rejected payment creation |
 | `PAYMENT_EXPIRED` | 410 | Payment session/link expired |
 | `PAYMENT_AMOUNT_MISMATCH` | 409 | Webhook-reported amount disagrees with the stored payment |
-| `PAYMENT_PROVIDER_UNAVAILABLE` | 503 | Provider disabled (e.g. COD off) or its adapter raised `NotImplementedError` (Paymob/Fawry/valU today) |
+| `PAYMENT_METHOD_NOT_AVAILABLE` | 400 | The chosen method is not offered — its route is disabled or half-configured, or a COD limit was breached. Raised before an order exists. Ask `GET /payments/methods/` for what is available. |
+| `PAYMENT_PROVIDER_UNAVAILABLE` | 503 | A route that should be live could not be constructed. Rarer than the 400 above, and a configuration fault rather than a customer one. |
+| `PAYMENT_CURRENCY_MISMATCH` | 409 | A currency the payment layer does not accept, or a refund in a currency the customer did not pay in. |
+| `PAYMENT_INVALID_STATE` | 409 | The requested move is not legal for this payment — refunding one that holds no money, or settling a gateway payment by hand. |
+| `PAYMENT_PROVIDER_ERROR` | 502 | The gateway was unreachable or unusable. The payment row exists, so reconcile rather than assuming nothing happened. |
+| `REFUND_NOT_SUPPORTED` | 400 | This method's route cannot issue a refund through an API. |
 | `PAYMENT_ALREADY_CAPTURED` | 409 | Attempted to capture a payment not in `pending`/`authorized` |
 | `PAYMENT_WEBHOOK_INVALID_SIGNATURE` | 400 | Webhook signature verification failed |
 | `REFUND_EXCEEDS_CAPTURED_AMOUNT` | 409 | Requested refund + prior refunds exceeds the captured amount |

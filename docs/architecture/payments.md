@@ -1,7 +1,7 @@
 # Payments
 
 Files: `apps/payments/models.py`, `apps/payments/providers/` (`base.py`,
-`cod.py`, `paymob.py`, `fawry.py`, `valu.py`), `apps/payments/services.py`,
+`cod.py`, `instapay.py`, `paymob.py`), `apps/payments/services.py`,
 `apps/payments/views.py`, `apps/payments/tasks.py`.
 
 ## Provider abstraction
@@ -27,7 +27,7 @@ class PaymentProvider(ABC):
 ```
 
 `apps.payments.providers.get_payment_provider(code)` is the factory that
-resolves a provider code (`cod`/`paymob`/`fawry`/`valu`) to a concrete
+resolves a settlement route (`cod`/`instapay`/`paymob`) to a concrete
 instance. Result types (`CreatePaymentResult`, `CaptureResult`,
 `RefundResult`, `StatusResult`) are plain dataclasses so every provider,
 implemented or not, returns a uniform shape.
@@ -36,7 +36,7 @@ implemented or not, returns a uniform shape.
 
 - **`Payment`** — one row per checkout attempt against an `Order`
   (`order` FK, `on_delete=PROTECT`). Holds `provider`, `method` (the
-  customer-facing method: card/wallet/fawry_pay/valu/sympl/aman/cod),
+  customer-facing method: card/mobile_wallet/instapay/cod),
   `amount` (`MoneyField`), `status`, `provider_reference` (indexed),
   `idempotency_key` (indexed), `expires_at`, and a `metadata` JSON field
   explicitly documented as **non-sensitive only** — "never card numbers,
@@ -141,8 +141,7 @@ when only COD is enabled.
 |---|---|---|---|
 | **COD** (`cod.py`) | Fully implemented, no external API | Always returns `False` (no webhooks) | **Production-ready.** Verified end-to-end live: register → browse → add to cart → checkout → order confirmation → inventory deduction. |
 | **Paymob** (`paymob.py`) | Raises `NotImplementedError` unless `PAYMOB_ENABLED=True`, then raises anyway | Raises `NotImplementedError` | **Interface-complete skeleton only.** Every method exists with the correct signature and docstrings describing the intended flow (auth → order registration → payment key → iframe/redirect, HMAC webhook verification), but no HTTP calls are implemented. |
-| **Fawry** (`fawry.py`) | Same pattern | Same pattern | **Interface-complete skeleton only.** |
-| **valU** (`valu.py`) | Same pattern | Same pattern | **Interface-complete skeleton only.** No public sandbox is documented; requires a direct merchant agreement. |
+| **InstaPay** (`instapay.py`) | Publishes the shop's address and the reference to quote | Staff confirm receipt; no API call | **Live once `INSTAPAY_ADDRESS` is set.** InstaPay publishes no merchant API, so there is nothing to call — see `docs/payments/instapay.md`. |
 
 This is a deliberate project policy, stated directly in the source:
 
@@ -156,7 +155,7 @@ Each gateway's `__init__` first checks its `ENABLED` flag
 (`settings.PAYMENT_PROVIDERS["PAYMOB"]["ENABLED"]` etc., default `False`,
 `.env.example`) and raises `NotImplementedError` immediately if disabled —
 so even instantiating the provider fails loudly rather than silently
-returning fake success. See `docs/payments/paymob.md`, `docs/payments/fawry.md`,
+returning fake success. See `docs/payments/paymob.md`, `docs/payments/instapay.md`,
 `docs/payments/valu.md`, `docs/payments/cod.md` for the per-provider detail
 and required environment variables.
 

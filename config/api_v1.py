@@ -24,5 +24,8 @@ urlpatterns = [
     path("gift-cards/", include("apps.gift_cards.urls")),
     path("subscriptions/", include("apps.subscriptions.urls")),
     path("notifications/", include("apps.notifications.urls")),
+    path("content/", include("apps.content.urls")),
     path("admin-api/", include("apps.analytics.urls")),
+    path("admin-api/", include("apps.admin_api.urls")),
+    path("admin-api/", include("apps.content.urls_admin")),
 ]

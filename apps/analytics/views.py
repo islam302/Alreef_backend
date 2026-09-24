@@ -12,6 +12,7 @@ class TrackEventView(APIView):
     """Client-side event tracking (spec §54). Fire-and-forget — processed async."""
 
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "analytics"
 
     def post(self, request):
         serializer = TrackEventSerializer(data=request.data)

@@ -9,6 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView as BaseTokenRefreshView
 
 from apps.core.error_codes import ApplicationError, ErrorCodes
+from apps.core.frontend_links import frontend_url
 from apps.core.permissions import IsOwner
 from apps.core.response import success_response
 from apps.notifications.tasks import send_email_task, send_sms_task
@@ -142,7 +143,10 @@ class PasswordResetRequestView(APIView):
         user = User.objects.filter(email=serializer.validated_data["email"].lower()).first()
         if user:
             token = services.issue_password_reset_token(user)
-            reset_url = f"{request.data.get('frontend_reset_url', '')}?token={token}" if request.data.get("frontend_reset_url") else f"?token={token}"
+            # The host comes from FRONTEND_URL, never from the request body.
+            # Honouring a caller-supplied URL here would let anyone have us
+            # mail a real reset token to a victim, pointed at their server.
+            reset_url = frontend_url("/reset-password", token=token)
             send_email_task.delay(
                 to=user.email, subject=_("Reset your password"), template_name="reset_password",
                 context={"reset_url": reset_url}, event="password_reset", user_id=user.id,
@@ -172,7 +176,7 @@ class EmailVerifyRequestView(APIView):
         if request.user.email_verified:
             return success_response(message="Email already verified.")
         token = services.issue_email_verification_token(request.user)
-        verify_url = f"?token={token}"
+        verify_url = frontend_url("/verify-email", token=token)
         send_email_task.delay(
             to=request.user.email, subject=_("Verify your email"), template_name="verify_email",
             context={"verify_url": verify_url}, event="email_verification", user_id=request.user.id,

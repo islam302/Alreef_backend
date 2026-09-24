@@ -1,3 +1,5 @@
+import logging
+
 from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions
@@ -9,6 +11,8 @@ from apps.catalog.models import Product, ProductStatus
 from apps.catalog.serializers import ProductDetailSerializer, ProductListSerializer
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
+
+logger = logging.getLogger(__name__)
 
 PRODUCT_LIST_PREFETCH = ["images", "variants__attribute_values__attribute", "variants__images", "attribute_values__attribute"]
 
@@ -57,18 +61,37 @@ class ProductDetailView(RetrieveAPIView):
 
 
 def _track_recently_viewed(request, product):
+    """
+    Remember that this visitor looked at this product.
+
+    Wrapped in its own transaction and its own except: this is a convenience
+    feature on the busiest page in the shop, and it must never be the reason
+    the page fails. It already was once — a unique constraint that Postgres
+    silently ignored (NULL is distinct from NULL) let duplicate rows in, and
+    update_or_create then raised MultipleObjectsReturned on every later view,
+    so the product page stayed broken for that visitor for good. The
+    constraint is fixed in migration 0004; this is the second line of defence
+    so the next surprise costs a log line instead of the page.
+    """
+    from django.db import transaction
+
     from apps.catalog.models import RecentlyViewed
 
-    if not request.session.session_key:
-        request.session.save()
-    user = request.user if request.user.is_authenticated else None
-    RecentlyViewed.objects.update_or_create(
-        user=user,
-        session_key=None if user else request.session.session_key,
-        product=product,
-        defaults={},
-    )
-    RecentlyViewed.trim_history(user=user, session_key=None if user else request.session.session_key)
+    try:
+        if not request.session.session_key:
+            request.session.save()
+        user = request.user if request.user.is_authenticated else None
+        session_key = None if user else request.session.session_key
+        with transaction.atomic():
+            RecentlyViewed.objects.update_or_create(
+                user=user,
+                session_key=session_key,
+                product=product,
+                defaults={},
+            )
+            RecentlyViewed.trim_history(user=user, session_key=session_key)
+    except Exception:  # noqa: BLE001 - never let tracking break the page
+        logger.warning("recently-viewed tracking failed for product %s", product.pk, exc_info=True)
 
 
 @extend_schema(tags=["Products"])

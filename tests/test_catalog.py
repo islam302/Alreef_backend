@@ -129,3 +129,69 @@ def test_search_endpoint_finds_product_by_name(api_client, product_with_variant_
 def test_search_endpoint_requires_query_param(api_client):
     response = api_client.get(SEARCH_URL)
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Recently-viewed tracking must never break the product page
+# ---------------------------------------------------------------------------
+
+
+def test_product_detail_survives_repeated_views_by_the_same_guest(
+    api_client, product_with_variant_and_stock
+):
+    """The regression that made this matter: the unique constraint on
+    RecentlyViewed listed three columns, one of which is always NULL, and
+    Postgres treats NULL as distinct from NULL — so it enforced nothing.
+    Duplicate rows accumulated and update_or_create's get() then raised
+    MultipleObjectsReturned on every later view, leaving the product page
+    permanently 500 for that visitor."""
+    slug = product_with_variant_and_stock["product"].slug
+
+    for _ in range(4):
+        response = api_client.get(f"/api/v1/products/{slug}/")
+        assert response.status_code == 200, response.content
+
+    from apps.catalog.models import RecentlyViewed
+
+    assert RecentlyViewed.objects.count() == 1
+
+
+def test_product_detail_answers_even_when_tracking_blows_up(
+    api_client, product_with_variant_and_stock
+):
+    """Second line of defence. Recently-viewed is a convenience feature on the
+    busiest page in the shop; whatever goes wrong inside it, the customer
+    must still get the product."""
+    from unittest import mock
+
+    slug = product_with_variant_and_stock["product"].slug
+
+    with mock.patch(
+        "apps.catalog.models.RecentlyViewed.objects.update_or_create",
+        side_effect=RuntimeError("tracking exploded"),
+    ):
+        response = api_client.get(f"/api/v1/products/{slug}/")
+
+    assert response.status_code == 200, response.content
+    assert response.json()["data"]["slug"] == slug
+
+
+def test_recently_viewed_rejects_a_duplicate_at_the_database_level(
+    db, product_with_variant_and_stock, user
+):
+    """The constraint itself, not the view's handling of it."""
+    from django.db import IntegrityError, transaction
+
+    from apps.catalog.models import RecentlyViewed
+
+    product = product_with_variant_and_stock["product"]
+
+    RecentlyViewed.objects.create(user=None, session_key="abc123", product=product)
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            RecentlyViewed.objects.create(user=None, session_key="abc123", product=product)
+
+    RecentlyViewed.objects.create(user=user, session_key=None, product=product)
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            RecentlyViewed.objects.create(user=user, session_key=None, product=product)

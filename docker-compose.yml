@@ -110,12 +110,19 @@ services:
         condition: service_healthy
     command: celery -A config beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     healthcheck:
-      # celery-beat has no HTTP server to probe (unlike web) and no
-      # equivalent of `celery inspect ping` (that's worker-only), so the
-      # image's default curl-based HEALTHCHECK (aimed at the web service)
-      # would always fail here — disable it and rely on `restart:
-      # unless-stopped` + `docker compose logs celery-beat` for liveness.
-      disable: true
+      # beat serves no HTTP and `celery inspect ping` is worker-only, so there is
+      # no functional probe to make. This is a liveness check: it asserts a beat
+      # process still exists in the container, which is what catches a scheduler
+      # that died on startup and left the whole schedule silently unrun.
+      #
+      # /proc rather than pgrep because the python:slim base ships no procps, and
+      # adding a package for a healthcheck is a poor trade. cmdline is
+      # NUL-separated, hence `grep -a`.
+      test: ["CMD-SHELL", "grep -qa 'celery' /proc/*/cmdline && grep -qa 'beat' /proc/*/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   nginx:
     image: nginx:1.27-alpine

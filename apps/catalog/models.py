@@ -249,7 +249,30 @@ class RecentlyViewed(BaseModel):
 
     class Meta:
         indexes = [models.Index(fields=["user", "viewed_at"]), models.Index(fields=["session_key", "viewed_at"])]
-        unique_together = [("user", "session_key", "product")]
+        # NOT unique_together on (user, session_key, product).
+        #
+        # Every row here has one of the two owner columns NULL — a guest has
+        # no user, a signed-in customer has no session_key — and Postgres
+        # treats NULL as distinct from NULL in a unique index. So the old
+        # three-column constraint never fired for anybody, two concurrent
+        # views of the same page inserted two rows, and update_or_create's
+        # get() then raised MultipleObjectsReturned on every later view:
+        # a permanent 500 on that product page for that visitor.
+        #
+        # Two partial constraints say what was actually meant, and each one
+        # covers a case where neither column in it is NULL.
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "product"],
+                condition=models.Q(session_key__isnull=True),
+                name="uniq_recentlyviewed_user_product",
+            ),
+            models.UniqueConstraint(
+                fields=["session_key", "product"],
+                condition=models.Q(user__isnull=True),
+                name="uniq_recentlyviewed_session_product",
+            ),
+        ]
 
     @classmethod
     def trim_history(cls, *, user=None, session_key=None):

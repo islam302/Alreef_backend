@@ -1,4 +1,5 @@
 import os
+import re
 
 from django.core.exceptions import ValidationError
 from PIL import Image
@@ -44,3 +45,23 @@ def validate_video_file(file):
     allowed = {".mp4", ".mov", ".webm"}
     if ext not in allowed:
         raise ValidationError(f"Unsupported video extension '{ext}'. Allowed: {sorted(allowed)}")
+
+
+# Staff-authored copy (site content, page bodies, FAQ answers) is stored as
+# plain text / light Markdown and rendered as text by the storefront. This
+# validator is the second line of defence: even if a renderer is later
+# switched to raw HTML, the dangerous constructs never made it into the row.
+UNSAFE_HTML_PATTERNS = [
+    re.compile(r"<\s*/?\s*(script|iframe|object|embed|style|link|meta|form|svg|base)\b", re.IGNORECASE),
+    re.compile(r"javascript\s*:", re.IGNORECASE),
+    re.compile(r"\bon[a-z]+\s*=", re.IGNORECASE),
+]
+
+
+def validate_no_unsafe_html(value):
+    """Rejects script-bearing markup in staff-authored copy."""
+    if not value:
+        return
+    for pattern in UNSAFE_HTML_PATTERNS:
+        if pattern.search(value):
+            raise ValidationError("HTML tags, inline event handlers and javascript: URLs are not allowed here.")

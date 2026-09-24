@@ -12,6 +12,7 @@ class CouponValidateView(APIView):
     """Lets the frontend preview a coupon's terms before applying it to the cart."""
 
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "coupon"
 
     def get(self, request, code):
         coupon = get_valid_coupon(code)

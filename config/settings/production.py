@@ -6,6 +6,15 @@ from .base import *  # noqa: F401,F403
 DEBUG = False
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv())
 
+# base.py computes API_DOCS_ENABLED as `config("API_DOCS_ENABLED", default=DEBUG)`,
+# and that DEBUG is the *environment's* value, read before this module forces it
+# to False. So an environment carrying DEBUG=True — a copied .env, a leftover
+# platform variable — got DEBUG correctly disabled here while silently keeping
+# the docs on, publishing a complete map of every route including the admin API.
+# Re-evaluate it against the DEBUG that actually applies: off unless the operator
+# asks for it by name, which is what the note in base.py always claimed.
+API_DOCS_ENABLED = config("API_DOCS_ENABLED", default=False, cast=bool)
+
 # Fail closed: never allow a production boot (gunicorn, celery, manage.py) to
 # proceed silently on the insecure dev fallback key from base.py.
 if SECRET_KEY == "django-insecure-change-me-in-env":  # noqa: F405

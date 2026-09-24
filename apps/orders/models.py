@@ -38,12 +38,18 @@ ORDER_STATUS_TRANSITIONS = {
 
 
 class PaymentMethodSnapshot(models.TextChoices):
-    CARD = "card", "Card"
-    FAWRY_PAY = "fawry_pay", "FawryPay"
-    MOBILE_WALLET = "mobile_wallet", "Mobile wallet"
-    VALU = "valu", "valU (BNPL)"
-    SYMPL = "sympl", "Sympl (BNPL)"
-    AMAN = "aman", "Aman (installments)"
+    """
+    The payment methods this shop accepts.
+
+    Deliberately short. Fawry, valU, Sympl and Aman were here and were removed:
+    the business does not want them, and carrying a method nobody can use means
+    carrying an adapter nobody tests. What remains is what ELREEF actually sells
+    with — see docs/payments/PROVIDERS.md.
+    """
+
+    CARD = "card", "Card (Visa / Mastercard / Meeza)"
+    MOBILE_WALLET = "mobile_wallet", "Mobile wallet (Vodafone Cash etc.)"
+    INSTAPAY = "instapay", "InstaPay bank transfer"
     COD = "cod", "Cash on delivery"
 
 

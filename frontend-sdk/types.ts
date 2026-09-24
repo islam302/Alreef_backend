@@ -539,11 +539,8 @@ export interface ShipmentTracking {
 
 export type PaymentMethod =
   | "card"
-  | "fawry_pay"
   | "mobile_wallet"
-  | "valu"
-  | "sympl"
-  | "aman"
+  | "instapay"
   | "cod";
 
 /** Body for POST /api/v1/checkout/summary/ and POST /api/v1/checkout/. */
@@ -571,13 +568,30 @@ export interface CheckoutTotals {
 /** Response data for POST /api/v1/checkout/ (order creation). */
 export interface CheckoutResult {
   order: OrderDetail;
+  /**
+   * Deliberately narrow: enough to send the customer onward, and nothing that
+   * would let a client decide the order is paid. That verdict comes only from
+   * `GET /payments/{id}/status/`.
+   *
+   * For cash on delivery `status` is `"pending"` — the order is confirmed, but
+   * nobody has collected any cash. It used to be `"captured"` here, which said
+   * the money was ours before a courier had left.
+   */
   payment: {
     id: number;
     provider: string;
+    method: PaymentMethod;
     status: PaymentStatus;
+    /** A gateway URL, when the customer must leave to pay. Empty otherwise. */
     redirect_url: string;
     iframe_url: string;
     provider_reference: string;
+    /** Arabic instruction to show the customer. */
+    instructions_ar: string;
+    /** Where the customer sends money themselves — an InstaPay address. Empty otherwise. */
+    pay_to: string;
+    /** The reference to quote with that transfer, so staff can match it. */
+    pay_reference: string;
   };
 }
 
@@ -725,12 +739,28 @@ export interface ReturnRequestInput {
 // Payments (apps/payments/serializers.py, models.py)
 // ---------------------------------------------------------------------------
 
-export type PaymentProvider = "paymob" | "fawry" | "valu" | "cod" | "manual";
+/**
+ * The settlement route holding the payment — not the method the customer chose.
+ *
+ * `instapay` appears here as a route of its own because InstaPay publishes no
+ * merchant API: the customer transfers from their banking app and a staff member
+ * confirms. If Paymob's InstaPay integration lands, the same method starts
+ * arriving as `{ provider: "paymob", method: "instapay" }` instead.
+ */
+export type PaymentProvider = "paymob" | "instapay" | "cod" | "manual";
 
+/**
+ * `captured` is the paid state. A payment whose money is ours is either
+ * `captured` or `partially_refunded`.
+ */
 export type PaymentStatus =
   | "pending"
+  /** The customer has something to do — a gateway page, a transfer to make — and has not paid. */
+  | "requires_action"
   | "authorized"
   | "captured"
+  /** A refund is with the gateway and not yet confirmed. */
+  | "refund_pending"
   | "failed"
   | "cancelled"
   | "expired"
@@ -745,8 +775,32 @@ export interface Payment {
   amount: string;
   status: PaymentStatus;
   provider_reference: string;
+  /** Non-secret navigation data only: a checkout URL, a payment address, instructions. */
   metadata: Record<string, unknown>;
+  /** The provider's own reason for the last failure, when there is one. */
+  failure_reason: string;
   created_at: string;
+  updated_at: string;
+}
+
+/**
+ * One offerable payment method, from `GET /payments/methods/`.
+ *
+ * This endpoint is the ONLY place a client should learn which methods exist.
+ * Keeping a local list means two answers to "can we take a card?", and they drift
+ * the dangerous way: the shop keeps offering a method after its credentials are
+ * pulled, and the customer finds out after entering an address.
+ */
+export interface PaymentMethodOption {
+  code: PaymentMethod;
+  label_ar: string;
+  label_en: string;
+  instructions_ar: string;
+  /** True when paying means leaving the site. */
+  redirects: boolean;
+  sort_order: number;
+  /** A surcharge as a decimal string, or null. Only COD has one today. */
+  cod_fee: string | null;
 }
 
 export type RefundStatus = "pending" | "processed" | "failed";
@@ -944,4 +998,149 @@ export interface NotificationPreference {
   marketing_sms: boolean;
   marketing_whatsapp: boolean;
   marketing_push: boolean;
+}
+
+/* ---------- Site content (apps.content) ------------------------------------ */
+export interface SiteSettings {
+  name_ar: string;
+  full_name_ar: string;
+  name_en: string;
+  legal_name_ar: string;
+  descriptor_ar: string;
+  descriptor_en: string;
+  tagline_ar: string;
+  tagline_en: string;
+  founded_year: number | null;
+  site_url: string;
+  logo: string | null;
+  og_image: string | null;
+  email: string;
+  support_hours_ar: string;
+  announcement_enabled: boolean;
+  announcement_text_ar: string;
+  /** Path ("/products") or absolute URL. Empty when the bar is not a link. */
+  announcement_url: string;
+  meta_title_ar: string;
+  meta_description_ar: string;
+  updated_at: string;
+}
+
+export interface ContactPhone {
+  id: number;
+  label: string;
+  /** As printed, e.g. "010 6060 4405". */
+  display: string;
+  /** Digits only with country code, for tel:/wa.me — e.g. "201060604405". */
+  dial: string;
+  is_whatsapp: boolean;
+  is_primary: boolean;
+  sort_order: number;
+}
+
+export interface Branch {
+  id: number;
+  name: string;
+  address: string;
+  region: string;
+  plus_code: string;
+  postal_code: string;
+  maps_url: string;
+  phone: string;
+  working_hours_ar: string;
+  sort_order: number;
+}
+
+export type SocialPlatform =
+  | "facebook"
+  | "instagram"
+  | "tiktok"
+  | "youtube"
+  | "whatsapp"
+  | "x"
+  | "linkedin"
+  | "other";
+
+export interface SocialLink {
+  id: number;
+  platform: SocialPlatform;
+  label: string;
+  url: string;
+  sort_order: number;
+}
+
+/** GET /content/site/ — everything the storefront chrome needs, in one call. */
+export interface SiteBundle {
+  settings: SiteSettings;
+  phones: ContactPhone[];
+  branches: Branch[];
+  social: SocialLink[];
+}
+
+export type PageSectionKind = "text" | "card" | "stat" | "image" | "quote" | "cta";
+
+export interface PageSection {
+  id: number;
+  kind: PageSectionKind;
+  /** Stable handle the storefront can key layout off, e.g. "value-clarity". */
+  key: string;
+  eyebrow: string;
+  title: string;
+  /** Plain text. Never render as HTML. */
+  body: string;
+  image: string | null;
+  image_alt: string;
+  icon: string;
+  link_url: string;
+  link_label: string;
+  data: Record<string, unknown>;
+  sort_order: number;
+}
+
+export interface PageListItem {
+  id: number;
+  slug: string;
+  title_ar: string;
+  title_en: string;
+  subtitle_ar: string;
+  sort_order: number;
+  updated_at: string;
+}
+
+export interface PageDetail {
+  id: number;
+  slug: string;
+  title_ar: string;
+  title_en: string;
+  subtitle_ar: string;
+  /** Plain text / light Markdown. Never render as HTML. */
+  body_ar: string;
+  body_en: string;
+  hero_image: string | null;
+  hero_image_alt: string;
+  meta_title: string;
+  meta_description: string;
+  sections: PageSection[];
+  updated_at: string;
+}
+
+export interface FaqItem {
+  id: number;
+  question: string;
+  answer: string;
+  topic: string;
+  sort_order: number;
+}
+
+export interface ContactMessageInput {
+  name: string;
+  /** Egyptian mobile: 01[0125] + 8 digits. */
+  phone: string;
+  email?: string;
+  subject?: string;
+  message: string;
+}
+
+export interface ContactMessageReceipt {
+  id: number;
+  created_at: string;
 }

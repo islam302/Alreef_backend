@@ -59,7 +59,7 @@ for an ERD, and `docs/architecture/checkout.md` / `payments.md` for sequence dia
 - Reviews gated to verified (delivered-order) purchases, with photo upload and moderation
 - Checkout with backend-authoritative totals (tax, shipping, discounts — the frontend never computes money), idempotent order creation
 - Order state machine with returns/refunds workflow
-- Payment provider abstraction — **COD is fully implemented**; Paymob/Fawry/valU adapters are interface-complete but gated behind `NotImplementedError` until real merchant credentials + verified official API docs are wired in (see [Payments](#payments))
+- Payment provider abstraction — **COD and InstaPay are live**; the Paymob adapter (card + mobile wallet) is complete against Paymob's official documentation but stays disabled until a merchant account and verified credentials exist (see [Payments](#payments))
 - Shipping zones/methods/rates (flat/weight/price-based, free-shipping thresholds), provider abstraction (manual fulfillment live; Bosta/Aramex skeletons)
 - Loyalty points, gift cards, store credit
 - Subscriptions (recurring orders) with Celery-driven billing cycles
@@ -167,8 +167,8 @@ logout) documented in `docs/api/authentication.md` and
 - **ReDoc:** `GET /api/redoc/`
 - **Narrative docs:** `docs/api/*.md` (one file per domain: authentication,
   products, categories, cart, checkout, payments, orders, shipping,
-  coupons, reviews, returns, errors, pagination, filtering, image-upload,
-  webhooks)
+  coupons, reviews, returns, content, errors, pagination, filtering,
+  image-upload, webhooks)
 - **Architecture docs:** `docs/architecture/*.md`
 - **Payment provider notes:** `docs/payments/*.md`
 - **Deployment docs:** `docs/deployment/*.md`
@@ -183,11 +183,23 @@ scripts).
 
 ## Frontend integration
 
-Start at `docs/frontend/QUICKSTART.md` for a login→browse→cart→checkout→pay→
-view-order walkthrough, `docs/frontend/README.md` for the full integration
-guide, and `docs/frontend/types.ts` / `frontend-sdk/` for TypeScript types
-and a ready-to-use API client (axios-based: auth, products, cart, checkout,
-orders, payments modules).
+`docs/frontend/` is a self-contained guide for whoever builds the storefront:
+
+| File | Covers |
+|---|---|
+| `SETUP.md` | Getting the API running locally, seed data, test accounts, common failures |
+| `QUICKSTART.md` | login→browse→cart→checkout→pay→view-order walkthrough |
+| `README.md` | Full integration guide, per domain |
+| `ENDPOINTS.md` | Every route: auth, pagination shape, throttle scope |
+| `ERROR-HANDLING.md` | Error codes → UI, the 401/refresh rule, idempotent checkout retries |
+| `STATES.md` | Every enum, the order state machine, which actions to show when |
+| `PAYMENTS.md` | Checkout and payment flows, and which providers actually work today |
+| `DATA-FETCHING.md` | React Query / SSR patterns, cache keys, invalidation |
+| `I18N.md` | Arabic/RTL, bilingual field coverage, money and date formatting |
+| `types.ts` | TypeScript interfaces for every payload |
+
+`frontend-sdk/` is a ready-to-use axios client (auth, products, cart, checkout,
+orders, payments modules) implementing the same flows.
 
 ## Payments
 
@@ -195,16 +207,23 @@ Provider abstraction at `apps/payments/providers/` (`PaymentProvider` ABC:
 `create_payment` / `authorize` / `capture` / `cancel` / `refund` /
 `get_status` / `verify_webhook` / `parse_webhook_event`).
 
-| Provider | Status |
-|---|---|
-| **COD** (Cash on delivery) | ✅ Fully implemented, no external calls |
-| Paymob | ⚙️ Interface-complete adapter, `NotImplementedError` until `PAYMOB_ENABLED=True` + verified real credentials/API docs are wired in |
-| Fawry | ⚙️ Same — requires merchant onboarding |
-| valU (BNPL) | ⚙️ Same — requires merchant credentials |
-| Sympl, Aman | Mapped in `apps/checkout/services.PAYMENT_METHOD_PROVIDER_MAP` but no adapter module yet — add one following `apps/payments/providers/valu.py` as a template once official docs/credentials exist |
+Four methods, and no others. Ask `GET /payments/methods/` rather than hard-coding
+this table: it returns only what this installation can actually complete.
 
-This project deliberately does not fabricate undocumented gateway request/
-response formats — see `docs/payments/*.md`.
+| Method | Route | Status |
+|---|---|---|
+| **Cash on delivery** | none | ✅ Live. Captured when the courier marks the order delivered — not at checkout. |
+| **InstaPay** | `instapay` | ✅ Live once `INSTAPAY_ADDRESS` is set. InstaPay publishes no merchant API, so the customer transfers from their banking app and a staff member confirms receipt. |
+| **Visa / Mastercard / Meeza** | `paymob` | ⚙️ Complete against Paymob's official docs, disabled until a merchant account exists. |
+| **Vodafone Cash** and other wallets | `paymob` | ⚙️ Same Paymob adapter, same requirement. |
+
+Fawry, valU, Sympl and Aman were implemented and then **removed** at the business's
+request. They are gone from the settings, the adapters, the model choices and both
+frontends; tests assert that none of those codes resolves to an adapter.
+
+Run `python manage.py check_payments` to see, per method, whether it is offerable and
+exactly which setting is missing if it is not. This project deliberately does not
+fabricate undocumented gateway request/response formats — see `docs/payments/*.md`.
 
 Idempotency: `POST /checkout/` and `POST /payments/{id}/refund/` require an
 `Idempotency-Key` header (`apps/core/idempotency.py`). Webhooks are
@@ -358,11 +377,15 @@ verified against each provider's current official docs, configure
 
 ## Known limitations
 
-- Paymob/Fawry/valU/Sympl/Aman/Bosta/Aramex live integrations require real
-  merchant credentials and verified current API docs — not available in
-  this environment, so those adapters are architecturally complete but
-  inert until configured (see [Payments](#payments) and
-  `docs/payments/*.md`).
+- The Paymob integration (card, mobile wallet) and the Bosta/Aramex shipping
+  adapters require real merchant credentials, which are not available in this
+  environment. The Paymob adapter is written against Paymob's current official
+  documentation and tested against fixtures of those documented shapes, but it
+  has never been run against a Paymob environment — even their sandbox needs
+  merchant onboarding. It therefore ships **disabled** and must not be described
+  as live until its sandbox flow, webhook verification, failure path, refund path
+  and idempotency checks have all passed against the real thing (see
+  [Payments](#payments) and `docs/payments/paymob.md`).
 - Product full-text search computes a `SearchVector` per query rather than
   using a stored, GIN-indexed `SearchVectorField` — fine at seed-data scale,
   worth optimizing before a large catalog (see `docs/architecture/scalability.md`).

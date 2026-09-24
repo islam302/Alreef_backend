@@ -4,7 +4,7 @@ Endpoint: `POST /api/v1/payments/webhooks/{provider}/`
 
 Source: `apps/payments/views.py:PaymentWebhookView`, `apps/payments/services.py:process_webhook`, `apps/payments/models.py:PaymentWebhookEvent`.
 
-`{provider}` is one of `PaymentProviderCode` values: `paymob | fawry | valu | cod | manual`. An unknown provider segment returns `404 NOT_FOUND`.
+`{provider}` is **`paymob` and nothing else.** It is the only route that sends us webhooks; cash on delivery and InstaPay are settled by a staff member, so a POST claiming to be their webhook could only be hostile. Any other segment — `cod`, `instapay`, `manual`, or a removed gateway — returns `404 NOT_FOUND`, which is a stronger guarantee than relying on an adapter to refuse it.
 
 ## Auth: none, by design
 
@@ -26,7 +26,8 @@ Payment gateways call this URL directly from their own servers — there is no u
 ## Response codes
 
 - `200` — signature valid and event processed (or replayed as a no-op).
-- `202` — provider recognized but its adapter isn't implemented yet (Paymob/Fawry/valU today — see `docs/api/payments.md`). The webhook is acknowledged (so the gateway doesn't treat it as a delivery failure and hammer retries) but **not processed**; this is logged as a warning server-side.
+- `202` — signed and recorded, but **not applied**: the gateway is disabled at our end, the event names a payment we do not hold, it is older than `PAYMENT_WEBHOOK_MAX_AGE_HOURS`, it carries a status we have no mapping for, or it arrived out of order. Acknowledged so the provider stops retrying — repeating it will not change our answer — and recorded with a `rejection_reason` staff can query. See the full matrix in `docs/payments/FLOWS.md`.
+- `409` — signed correctly and **contradicts our record** on amount, currency or merchant reference. The one to alert on: two systems disagree about money.
 - `400` — signature verification failed (`PAYMENT_WEBHOOK_INVALID_SIGNATURE`).
 - `404` — `{provider}` isn't a recognized `PaymentProviderCode`.
 
@@ -34,4 +35,4 @@ There is no JSON success envelope on `200`/`202` — the view returns a bare `Ht
 
 ## Secrets
 
-Webhook signing secrets (`PAYMOB_HMAC_SECRET`, `FAWRY_SECURITY_KEY`, `VALU_API_KEY`, etc.) are read exclusively from environment variables via `django-decouple` (`config/settings/base.py:PAYMENT_PROVIDERS`), sourced from `.env` (see `.env.example` for the full variable list — every value in that file is blank/disabled by default). **They must never be committed to the repository, hard-coded, or written into documentation** — this file intentionally does not reproduce any secret value or example signature.
+Webhook signing secrets (`PAYMOB_HMAC_SECRET`, and `PAYMOB_API_KEY` for refunds) are read exclusively from environment variables via `django-decouple` (`config/settings/base.py:PAYMENT_PROVIDERS`), sourced from `.env` (see `.env.example` for the full variable list — every value in that file is blank/disabled by default). **They must never be committed to the repository, hard-coded, or written into documentation** — this file intentionally does not reproduce any secret value or example signature.

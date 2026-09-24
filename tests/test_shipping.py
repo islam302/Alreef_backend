@@ -29,10 +29,13 @@ def test_list_governorates_is_public(api_client, governorate):
     response = api_client.get(GOVERNORATES_URL)
 
     assert response.status_code == 200
-    # GovernorateListView has pagination_class=None and does not wrap the
-    # response in the {success, data, ...} envelope -- it returns the raw
-    # serialized list, unlike most other list endpoints in this codebase.
-    codes = [g["code"] for g in response.json()]
+    # Enveloped like everything else. It was not, once: pagination_class=None
+    # is right for a 27-row reference list, but the envelope is applied BY the
+    # pagination class, so switching it off returned a bare array and the
+    # storefront's address form read `undefined` — checkout unreachable.
+    body = response.json()
+    assert set(body.keys()) == {"success", "message", "data", "errors"}
+    codes = [g["code"] for g in body["data"]]
     assert governorate.code in codes
 
 
@@ -43,7 +46,7 @@ def test_inactive_governorate_excluded_from_list(api_client, governorate):
 
     response = api_client.get(GOVERNORATES_URL)
 
-    codes = [g["code"] for g in response.json()]
+    codes = [g["code"] for g in response.json()["data"]]
     assert "inactive-gov" not in codes
 
 
@@ -57,7 +60,9 @@ def test_list_cities_filtered_by_governorate(api_client, governorate):
     response = api_client.get(CITIES_URL, {"governorate": governorate.code})
 
     assert response.status_code == 200
-    names = [c["name_en"] for c in response.json()]
+    body = response.json()
+    assert set(body.keys()) == {"success", "message", "data", "errors"}
+    names = [c["name_en"] for c in body["data"]]
     assert names == ["Nasr City"]
 
 

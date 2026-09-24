@@ -42,7 +42,11 @@ def get_admin_dashboard_summary() -> dict:
         .order_by("-units_sold")[:5]
     )
 
-    low_stock_count = sum(1 for item in InventoryItem.objects.select_related("variant") if item.is_low_stock)
+    # One COUNT over annotated totals. This used to load every inventory row
+    # and ask each one in Python, which cost two sum queries per item — 36 of
+    # the overview's queries on a six-product catalogue, and growing with the
+    # catalogue on the one panel staff see first.
+    low_stock_count = InventoryItem.objects.low_stock().count()
     expired_batches_count = get_expired_batches().count()
 
     payments_today = Payment.objects.filter(created_at__date=today)

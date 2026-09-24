@@ -536,13 +536,16 @@ export interface ShipmentTracking {
 // Checkout (apps/checkout/serializers.py)
 // ---------------------------------------------------------------------------
 
+/**
+ * What the customer picks at checkout.
+ *
+ * Ask `GET /payments/methods/` rather than hard-coding a subset: it returns only
+ * the methods this installation can actually complete, with their Arabic labels.
+ */
 export type PaymentMethod =
   | "card"
-  | "fawry_pay"
   | "mobile_wallet"
-  | "valu"
-  | "sympl"
-  | "aman"
+  | "instapay"
   | "cod";
 
 /** Body for POST /api/v1/checkout/summary/ and POST /api/v1/checkout/. */
@@ -724,7 +727,13 @@ export interface ReturnRequestInput {
 // Payments (apps/payments/serializers.py, models.py)
 // ---------------------------------------------------------------------------
 
-export type PaymentProvider = "paymob" | "fawry" | "valu" | "cod" | "manual";
+/**
+ * The settlement route holding the payment — not the method the customer chose.
+ *
+ * `instapay` is a route of its own because InstaPay publishes no merchant API:
+ * the customer transfers from their banking app and a staff member confirms.
+ */
+export type PaymentProvider = "paymob" | "instapay" | "cod" | "manual";
 
 export type PaymentStatus =
   | "pending"

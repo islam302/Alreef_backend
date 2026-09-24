@@ -26,7 +26,17 @@ This checklist is grounded in `config/settings/base.py`,
   frontend origin(s) — both default to `http://localhost:3000`, which must
   not remain in production.
 - [ ] Set `FRONTEND_URL` — used to build links in outbound emails
-  (verification, password reset).
+  (verification, password reset). This is the *only* source of the host in
+  those links: the endpoints deliberately ignore any URL in the request
+  body, because honouring one would let anyone have us mail a victim a real
+  reset token pointed at their own server. If this is wrong, reset links are
+  broken; if it were caller-supplied, they would be an account-takeover
+  primitive. See `apps/core/frontend_links.py`.
+- [ ] Leave `API_DOCS_ENABLED` unset (it defaults to `DEBUG`, so off in
+  production). `/api/schema/`, `/api/docs/` and `/api/redoc/` are not
+  mounted at all when it is off — the schema documents every admin route
+  and is a complete map of the back office. Set it to `True` on a staging
+  box if the frontend team needs Swagger there.
 
 ## 2. Transport security (`config/settings/production.py`)
 
@@ -97,25 +107,116 @@ verify them rather than assume:
 
 ## 5. Payment providers
 
-- [ ] **COD is production-ready as-is** (`COD_ENABLED=True` by default) —
-  confirm `COD_FEE_AMOUNT`, `COD_MIN_ORDER_AMOUNT`, `COD_MAX_ORDER_AMOUNT`
-  reflect your real business rules.
-- [ ] **Do not set `PAYMOB_ENABLED=True`, `FAWRY_ENABLED=True`, or
-  `VALU_ENABLED=True`** until the corresponding adapter
-  (`apps/payments/providers/{paymob,fawry,valu}.py`) has actually been
-  implemented against that provider's verified, official API documentation
-  with real sandbox-tested credentials — as shipped, these adapters raise
-  `NotImplementedError` for every operation including webhook signature
-  verification. Enabling the flag without implementing the adapter does not
-  make the gateway work; it only changes which error message customers see.
-  See `docs/architecture/payments.md` and `docs/payments/*.md`.
-- [ ] Once a gateway adapter is genuinely implemented and tested: set its
-  `_ENABLED=True` plus its credential env vars (`PAYMOB_API_KEY` /
-  `PAYMOB_INTEGRATION_ID_CARD` / `PAYMOB_INTEGRATION_ID_WALLET` /
-  `PAYMOB_IFRAME_ID` / `PAYMOB_HMAC_SECRET`; `FAWRY_MERCHANT_CODE` /
-  `FAWRY_SECURITY_KEY`; `VALU_API_KEY`) and register its webhook URL
-  (`https://<your-domain>/api/v1/payments/webhooks/<provider>/`) with the
-  provider.
+Run this first. It answers "which methods will customers see" and, for each one
+they will not, exactly which setting is empty:
+
+```bash
+python manage.py check_payments          # exits 1 if NO method is available
+python manage.py check_payments --strict # exits 1 if ANY method is unavailable
+```
+
+Full setup detail per provider, including the merchant-side steps, is in
+[`../payments/PROVIDERS.md`](../payments/PROVIDERS.md).
+
+### Always
+
+- [ ] Set **`BACKEND_PUBLIC_URL`** to this API's real public origin. Providers call
+  our webhooks out of band, so this cannot be derived from a request — and
+  `check_payments` prints the webhook URLs from it. If it says `localhost`, the URLs
+  you register with Paymob will too.
+- [ ] Leave **`PAYMENT_ALLOWED_CURRENCIES=EGP`** unless you genuinely sell in
+  another currency. Gateway integration IDs are currency-specific: a mismatch
+  charges the wrong amount *successfully*, and nothing notices until a
+  reconciliation weeks later.
+- [ ] Confirm **`PAYMENT_WEBHOOK_MAX_AGE_HOURS`** (default 72). Providers retry for
+  hours; anything older than this is recorded but not applied.
+- [ ] Verify Celery Beat is running (step 4). Without it
+  `reconcile_pending_payments_task` never fires, and a customer whose webhook was
+  dropped stays unconfirmed until somebody notices by hand.
+
+### Cash on delivery
+
+- [ ] **Live as shipped** (`COD_ENABLED=True`). Confirm `COD_FEE_AMOUNT`,
+  `COD_MIN_ORDER_AMOUNT` and `COD_MAX_ORDER_AMOUNT` match your real rules — all
+  three are now enforced at checkout, before an order exists. `COD_MAX_ORDER_AMOUNT=0`
+  means no ceiling.
+- [ ] Set `COD_ALLOWED_SHIPPING_METHOD_IDS` if any carrier you use will not handle
+  cash. Empty means any.
+- [ ] Know that a COD payment is **`pending` until collection**, and that moving an
+  order to `DELIVERED` is what captures it. Staff can also record it, or a refusal
+  at the door, from the dashboard. If your operations team was trained on the old
+  behaviour — where a COD payment looked paid the moment the order was placed —
+  tell them.
+
+### InstaPay
+
+InstaPay is live as a **bank transfer the customer makes and a staff member
+confirms**. There is no API and no webhook: InstaPay publishes no merchant
+acceptance API, and Paymob lists their InstaPay integration as coming soon. See
+[`../payments/instapay.md`](../payments/instapay.md).
+
+- [ ] Set `INSTAPAY_ENABLED=True` and `INSTAPAY_ADDRESS` to the shop's InstaPay
+  address (e.g. `alreef@instapay`). The address is **mandatory**: without it the
+  method is hidden rather than offered with nowhere to send the money.
+- [ ] Set `INSTAPAY_ACCOUNT_NAME` so a cautious customer can check the name in
+  their banking app before transferring.
+- [ ] **Train the team on the one rule that matters: do not ship an InstaPay order
+  until the transfer is confirmed in the dashboard.** The order stays `pending` and
+  its stock stays reserved until somebody posts the confirmation, and nothing in
+  the system can verify the transfer for them.
+- [ ] Tell them to refuse a short transfer rather than confirm it. The server
+  checks nothing here — it cannot — so confirming a short payment records money the
+  shop does not have.
+- [ ] Agree who checks the InstaPay app and how often. `INSTAPAY_CONFIRM_WINDOW_HOURS`
+  is only a note to staff; nothing enforces it.
+
+### Paymob
+
+Card and mobile wallet. The adapter is implemented against Paymob's current
+official documentation, and **has never been run against a real Paymob
+environment**, because that requires merchant onboarding. Do not enable it on
+production until you have completed the checklist in
+[`../payments/PROVIDERS.md`](../payments/PROVIDERS.md), which ends with a sandbox
+transaction, a verified callback, a refund and a failure path.
+
+- [ ] Setting `PAYMOB_ENABLED=True` is **not enough**. The methods stay hidden
+  until `PAYMOB_SECRET_KEY`, `PAYMOB_PUBLIC_KEY`, `PAYMOB_HMAC_SECRET` and at least
+  one `PAYMOB_INTEGRATION_ID_*` are all present. That is deliberate: a gateway that
+  can take money it cannot verify is worse than one switched off.
+- [ ] `PAYMOB_SECRET_KEY` and `PAYMOB_API_KEY` are **different credentials**. The
+  second is only used for refunds, voids and status inquiries — without it the shop
+  can take card payments and not refund them, which the dashboard shows per
+  payment.
+- [ ] Register the Paymob **Transaction Processed Callback** (server-to-server), not
+  the Transaction Response Callback:
+  `https://<your-domain>/api/v1/payments/webhooks/paymob/`. Point the *response*
+  callback at the storefront's `/order/payment-return` instead.
+- [ ] Set `PAYMOB_LIVE=True` when the keys are production keys. It changes no URL,
+  but it is recorded on every payment, so a live transaction created with a test key
+  is visible rather than merely wrong.
+- [ ] Leave `PAYMOB_INTEGRATION_ID_INSTAPAY` empty until InstaPay is live on the
+  account. Setting it moves InstaPay from the manual route to Paymob automatically.
+
+### Before you announce a payment method is live
+
+- [ ] `python manage.py check_payments` lists it as available.
+- [ ] `GET /payments/methods/` on the public API shows it, and the storefront's
+  checkout offers it.
+- [ ] You placed a real order with it and the money actually arrived where you
+  expected.
+
+For a gateway method (card, wallet) additionally:
+
+- [ ] A sandbox transaction completed and its callback arrived and verified.
+- [ ] A deliberately failed transaction left the order unconfirmed.
+- [ ] A refund executed, and an over-refund was refused.
+- [ ] The same webhook delivered twice changed nothing the second time.
+
+For a manually-settled method (COD, InstaPay) additionally:
+
+- [ ] Staff can find the order in the dashboard's `محتاجة إجراء` filter and confirm
+  it, and the order moved to confirmed as a result.
+- [ ] Somebody other than you has done that once, unaided.
 
 ## 6. Shipping providers
 

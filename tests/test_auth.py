@@ -171,3 +171,28 @@ def test_change_password_wrong_old_password_fails(authenticated_client):
 
     assert response.status_code == 401
     assert response.json()["errors"]["code"] == ErrorCodes.AUTH_INVALID_CREDENTIALS
+
+
+def test_an_egyptian_local_mobile_number_is_accepted(authenticated_client, governorate):
+    """Both frontends prompt for 01xxxxxxxxx — the local format every customer
+    in Egypt will type. Without PHONENUMBER_DEFAULT_REGION the field only
+    parsed E.164, so the address form was rejecting the exact shape its own
+    placeholder asked for and no customer could check out. The test fixtures
+    all used +20..., which is why nothing here noticed."""
+    response = authenticated_client.post(
+        "/api/v1/addresses/",
+        {
+            "label": "home",
+            "full_name": "Test Customer",
+            "phone": "01060604405",
+            "governorate": governorate.id,
+            "street": "Station St",
+            "building": "12",
+            "is_default": True,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.content
+    # Normalised on the way in, so everything downstream sees one format.
+    assert response.json()["data"]["phone"] == "+201060604405"

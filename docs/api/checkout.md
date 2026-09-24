@@ -16,7 +16,7 @@ Source: `apps/checkout/{urls,views,serializers,services}.py`. Both endpoints req
 |---|---|---|---|
 | `address_id` | int | yes | must belong to `request.user` (`apps.users.models.Address`) |
 | `shipping_method_id` | int | yes | must resolve to an available `ShippingMethod` for the address's governorate (`docs/api/shipping.md`) |
-| `payment_method` | string | yes | one of `card \| fawry_pay \| mobile_wallet \| valu \| sympl \| aman \| cod` (`PaymentMethodSnapshot` choices — see `docs/api/payments.md` for which are actually live) |
+| `payment_method` | string | yes | one of `card \| mobile_wallet \| instapay \| cod`. **Do not hard-code this list** — ask `GET /payments/methods/`, which returns only the methods this installation can actually complete. An unavailable method is a 400 `PAYMENT_METHOD_NOT_AVAILABLE`. |
 | `coupon_code` | string | no | applied on top of/instead of any coupon already on the cart |
 | `notes` | string | no | free-text order note, max 500 chars |
 

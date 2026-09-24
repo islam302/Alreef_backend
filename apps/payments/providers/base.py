@@ -1,7 +1,9 @@
 """
-Payment provider abstraction (spec §41). Every Egyptian gateway (Paymob,
-Fawry, valU, ...) plugs in by implementing this interface; Order/checkout
-code only ever talks to `PaymentProvider`, never a specific vendor SDK.
+Payment provider abstraction (spec §41). Every settlement route — Paymob, the
+InstaPay transfer, cash on delivery — plugs in by implementing this interface,
+and order/checkout code only ever talks to `PaymentProvider`, never a specific
+vendor SDK. Two of the three routes make no network call at all, which the
+interface accommodates rather than treating as a special case.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field

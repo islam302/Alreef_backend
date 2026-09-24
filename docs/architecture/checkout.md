@@ -54,7 +54,7 @@ sequenceDiagram
     Payment->>Provider: provider.create_payment(payment, order)
     alt COD
         Provider-->>Payment: success, reference=COD-xxxx, status=pending
-    else Gateway (paymob/fawry/valu)
+    else Gateway (paymob)
         Provider-->>Payment: NotImplementedError (until real credentials wired)
         Payment-->>Checkout: ApplicationError(PAYMENT_PROVIDER_UNAVAILABLE)
     end
@@ -149,12 +149,13 @@ Inside the single `@transaction.atomic` block of
    order. Each item also gets a corresponding `OrderItem` with its own
    product/SKU/price snapshot.
 4. `PAYMENT_METHOD_PROVIDER_MAP` resolves the payment method
-   (`cod`/`card`/`mobile_wallet`/`fawry_pay`/`valu`/`sympl`/`aman`) to a
-   provider code (`cod`/`paymob`/`fawry`/`valu`); unmapped/unsupported
+   (`cod`/`card`/`mobile_wallet`/`instapay`) to a settlement route
+   (`cod`/`instapay`/`paymob`) via `apps.payments.config.gateway_for_method`,
+   which is also what decides whether the method is offerable at all; unsupported
    methods raise `PAYMENT_PROVIDER_UNAVAILABLE`.
 5. `apps.payments.services.create_payment_for_order(order, provider_code, method)`
    creates a `Payment` row and calls the provider's `create_payment()`. A
-   `NotImplementedError` from an unconfigured gateway (Paymob/Fawry/valU) is
+   `NotImplementedError` from an unconfigured gateway (Paymob) is
    caught and re-raised as `ApplicationError(PAYMENT_PROVIDER_UNAVAILABLE)` —
    the whole transaction rolls back, so no order is left dangling without a
    working payment.

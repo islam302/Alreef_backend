@@ -84,11 +84,12 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<any>) => {
     const original = error.config as InternalAxiosRequestConfig & { _retried?: boolean };
-    const code = error.response?.data?.errors?.code;
+    // Refresh on the 401 *status*, not on errors.code: an expired access token comes
+    // back as code "VALIDATION_ERROR". See docs/frontend/ERROR-HANDLING.md.
     if (
       error.response?.status === 401 &&
-      (code === "AUTH_TOKEN_EXPIRED" || code === "AUTH_TOKEN_INVALID") &&
-      !original._retried
+      !original._retried &&
+      !original.url?.includes("/auth/token/refresh/")
     ) {
       original._retried = true;
       const newAccess = await refreshAccessToken();

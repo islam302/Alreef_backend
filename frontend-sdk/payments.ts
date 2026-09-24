@@ -10,7 +10,19 @@
  * from a customer-facing storefront.
  */
 import { apiGet } from "./api-client";
-import type { Payment, PaymentStatus } from "./types";
+import type { Payment, PaymentMethodOption, PaymentStatus } from "./types";
+
+/**
+ * GET /payments/methods/ — the payment methods this shop can actually complete.
+ *
+ * Public, and the single source of truth. Do not keep a local list of enabled
+ * methods: two copies drift, and they drift towards offering a method the server
+ * will refuse. Render what comes back, in `sort_order`; an empty array means no
+ * payment is currently possible.
+ */
+export async function getPaymentMethods(): Promise<PaymentMethodOption[]> {
+  return apiGet<PaymentMethodOption[]>("/payments/methods/");
+}
 
 /** GET /payments/{id}/ */
 export async function getPayment(id: number): Promise<Payment> {
@@ -26,7 +38,20 @@ export async function getPaymentStatus(id: number): Promise<Payment> {
   return apiGet<Payment>(`/payments/${id}/status/`);
 }
 
-const SETTLED_STATUSES: PaymentStatus[] = ["captured", "failed", "cancelled", "expired"];
+/**
+ * Statuses that will not change again.
+ *
+ * `requires_action` is deliberately absent: that is the customer still owing us an
+ * action, which is precisely what the poll is waiting on.
+ */
+const SETTLED_STATUSES: PaymentStatus[] = [
+  "captured",
+  "failed",
+  "cancelled",
+  "expired",
+  "refunded",
+  "partially_refunded",
+];
 
 export interface PollPaymentStatusOptions {
   /** Delay between polls, in ms. Default 2000. */
@@ -38,10 +63,22 @@ export interface PollPaymentStatusOptions {
 }
 
 /**
- * Polls GET /payments/{id}/status/ until the payment reaches a settled
- * status (captured/failed/cancelled/expired) or the timeout elapses.
- * Use this right after redirecting the user back from a card/Fawry/wallet
- * gateway — see docs/frontend/README.md -> "Recommended polling pattern".
+ * Polls GET /payments/{id}/status/ until the payment settles or the timeout
+ * elapses. Use it right after a customer returns from a gateway.
+ *
+ * TWO THINGS NOT TO DO WITH THE RESULT.
+ *
+ * Do not read the gateway's own query parameters instead. They arrive through the
+ * customer's browser, so anybody can type `?success=true`.
+ *
+ * Do not treat a timeout as a failure. The webhook may still be in flight, an
+ * Egyptian wallet confirmation can take minutes, and an InstaPay transfer is
+ * confirmed by a person during working hours. Show "we are confirming your
+ * payment" and let the order page be the answer — a false "failed" makes
+ * customers pay twice.
+ *
+ * This endpoint has its own throttle scope (`payment_status`, 60/min) because each
+ * call can reach a provider, so back the interval off if you poll for long.
  */
 export async function pollPaymentStatus(
   id: number,

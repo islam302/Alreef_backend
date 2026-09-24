@@ -90,13 +90,24 @@ def generate_order_for_subscription(subscription: Subscription) -> SubscriptionS
                 sku_snapshot=item.variant.sku, unit_price=unit_price, quantity=item.quantity, line_total=line_total,
             )
 
-        from apps.checkout.services import PAYMENT_METHOD_PROVIDER_MAP
-        from apps.payments.services import create_payment_for_order, mark_payment_captured
+        from apps.payments import config as payment_config
+        from apps.payments.services import create_payment_for_order
 
-        provider_code = PAYMENT_METHOD_PROVIDER_MAP.get(subscription.payment_method)
-        payment = create_payment_for_order(order=order, provider_code=provider_code, method=subscription.payment_method)
+        provider_code = payment_config.gateway_for_method(subscription.payment_method)
+        payment = create_payment_for_order(
+            order=order, provider_code=provider_code, method=subscription.payment_method,
+            # One payment per scheduled delivery. If this task is retried after
+            # the payment was created, the key finds the existing row instead of
+            # billing the customer for the same delivery twice.
+            idempotency_key=f"subscription:{subscription.id}:schedule:{schedule_entry.id}",
+        )
         if subscription.payment_method == "cod":
-            mark_payment_captured(payment)
+            # Confirmed, not paid. The courier has not been yet — same rule as a
+            # one-off COD order; the capture happens on delivery.
+            from apps.checkout.services import confirm_order
+
+            confirm_order(order, payment_received=False)
+            order.refresh_from_db()
 
         schedule_entry.order = order
         schedule_entry.status = SubscriptionScheduleStatus.PROCESSED

@@ -65,12 +65,29 @@ class CheckoutCreateView(IdempotentRequestMixin, APIView):
         order, payment = create_order_from_cart(
             user=request.user, cart=cart, address=address, shipping_method_id=data["shipping_method_id"],
             payment_method=data["payment_method"], coupon_code=data.get("coupon_code", ""), notes=data.get("notes", ""),
+            # Carried through to the Payment, where a unique constraint makes a
+            # retry that outlives the cache still unable to charge twice.
+            idempotency_key=request.headers.get("Idempotency-Key", ""),
         )
 
+        # Deliberately narrow. The storefront gets what it needs to send the
+        # customer onward and nothing else: no provider payload, no reference it
+        # has no use for, and never anything that would let it decide the order
+        # is paid. That verdict comes from GET /payments/{id}/status/.
         payment_data = {
-            "id": payment.id, "provider": payment.provider, "status": payment.status,
-            "redirect_url": payment.metadata.get("redirect_url", ""), "iframe_url": payment.metadata.get("iframe_url", ""),
+            "id": payment.id,
+            "provider": payment.provider,
+            "method": payment.method,
+            "status": payment.status,
+            "redirect_url": payment.metadata.get("redirect_url", ""),
+            "iframe_url": payment.metadata.get("iframe_url", ""),
             "provider_reference": payment.provider_reference,
+            # Shown to the customer: the sentence telling them what to do, and
+            # for a transfer, where to send it and what to quote. All published
+            # information — an InstaPay address is a payment address, not a secret.
+            "instructions_ar": payment.metadata.get("instructions_ar", ""),
+            "pay_to": payment.metadata.get("instapay_address", ""),
+            "pay_reference": payment.metadata.get("transfer_reference", order.order_number),
         }
         return success_response(
             {"order": OrderDetailSerializer(order).data, "payment": payment_data},

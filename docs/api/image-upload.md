@@ -45,15 +45,38 @@ curl -X POST "{{base_url}}/api/v1/reviews/" \
 Images are stored at `/media/reviews/<review_id>/<filename>` and returned in
 `data.images[].image` on the created review.
 
-## 3. Product / category / brand images
+## 3. Product images — admin only
 
-These are catalog/merchandising data, not user-generated content, so they
-are uploaded through the **Django admin** (`/admin/`) rather than a public
-API endpoint — the admin's image widgets already do multipart upload with
-the same validators. If a future storefront CMS integration needs
-programmatic catalog image upload, add an admin-only `multipart/form-data`
-endpoint following the same pattern as the review upload above; none exists
-today because nothing in this build currently calls it.
+Catalog imagery is merchandising data, not user-generated content, so there
+is no public endpoint. Staff upload it through `/api/v1/admin-api/`
+(`IsAdminUser`) with `multipart/form-data`:
+
+```bash
+# Add an image to a product
+curl -X POST "{{base_url}}/api/v1/admin-api/products/12/images/" \
+  -H "Authorization: Bearer {{staff_access_token}}" \
+  -F "image=@jar.jpg" \
+  -F "alt_text=برطمان عسل سدر 500 جم" \
+  -F "is_primary=true"
+
+# Edit alt text / primary flag / order, or remove it
+curl -X PATCH  "{{base_url}}/api/v1/admin-api/product-images/34/" ...
+curl -X DELETE "{{base_url}}/api/v1/admin-api/product-images/34/" ...
+```
+
+Setting `is_primary=true` clears the flag on the product's other images.
+Django admin (`/admin/`) edits the same rows through the same validators.
+
+## 4. Site content images — admin only
+
+`logo` and `og_image` on `PATCH /api/v1/admin-api/site-settings/`, plus
+`hero_image` on pages and `image` on page sections. Same rules, same
+multipart form. See [content.md](content.md).
+
+## 5. Category / brand images
+
+No API endpoint yet — these are edited in Django admin, whose image widgets
+run the same validators.
 
 ## Frontend example (fetch)
 

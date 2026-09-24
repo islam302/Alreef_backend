@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -11,15 +12,13 @@ from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.orders.models import Order, OrderItem, OrderStatus, PaymentMethodSnapshot
 from apps.shipping.services import get_quote_for_method
 
-PAYMENT_METHOD_PROVIDER_MAP = {
-    PaymentMethodSnapshot.COD: "cod",
-    PaymentMethodSnapshot.CARD: "paymob",
-    PaymentMethodSnapshot.MOBILE_WALLET: "paymob",
-    PaymentMethodSnapshot.FAWRY_PAY: "fawry",
-    PaymentMethodSnapshot.VALU: "valu",
-    PaymentMethodSnapshot.SYMPL: "sympl",
-    PaymentMethodSnapshot.AMAN: "aman",
-}
+logger = logging.getLogger(__name__)
+
+# The method -> route mapping used to live here as a dict. It now lives in
+# apps/payments/config.py, next to the configuration that decides whether each
+# method can be offered at all, because the two facts were drifting — and
+# because one method (InstaPay) has two possible routes, which a flat dict
+# cannot express.
 
 
 @dataclass
@@ -77,12 +76,48 @@ def calculate_totals(*, cart, address, shipping_method_id, payment_method: str, 
         quote = get_quote_for_method(governorate=address.governorate, method_id=shipping_method_id, subtotal=subtotal)
         shipping_total = Money(0, currency) if promo_free_shipping else quote.price
 
+    # Every method is checked for availability, not just COD: a method whose
+    # gateway is switched off or half-configured must fail here, while the
+    # customer is still on the checkout page, rather than after the order row
+    # exists.
+    from apps.payments import config as payment_config
+
+    availability = payment_config.availability(payment_method)
+    if not availability.available:
+        # `availability.reason` names our own configuration, so it is logged
+        # rather than returned. The customer gets the method label.
+        logger.warning("checkout rejected method '%s': %s", payment_method, availability.reason)
+        label = availability.spec.label_en if availability.spec else payment_method
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_METHOD_NOT_AVAILABLE,
+            f"{label} is not available at the moment. Please choose another payment method.",
+        )
+
     cod_fee = Money(0, currency)
     if payment_method == PaymentMethodSnapshot.COD:
-        cod_config = settings.PAYMENT_PROVIDERS["COD"]
-        if not cod_config["ENABLED"]:
-            raise ApplicationError(ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE, "Cash on delivery is not available.")
-        cod_fee = Money(cod_config["FEE_AMOUNT"], currency)
+        fee, minimum, maximum = payment_config.cod_limits()
+        cod_fee = Money(fee, currency)
+
+        # Checked against the order's own value, before the COD fee is added —
+        # a minimum that the fee itself satisfies would be no minimum at all.
+        payable = (discounted_subtotal + tax_total + shipping_total).amount
+        if minimum and payable < minimum:
+            raise ApplicationError(
+                ErrorCodes.PAYMENT_METHOD_NOT_AVAILABLE,
+                f"Cash on delivery needs an order of at least {minimum} {currency}.",
+            )
+        if maximum and payable > maximum:
+            raise ApplicationError(
+                ErrorCodes.PAYMENT_METHOD_NOT_AVAILABLE,
+                f"Cash on delivery is not available above {maximum} {currency}.",
+            )
+
+        allowed_shipping = payment_config.cod_allowed_shipping_method_ids()
+        if allowed_shipping is not None and shipping_method_id and int(shipping_method_id) not in allowed_shipping:
+            raise ApplicationError(
+                ErrorCodes.PAYMENT_METHOD_NOT_AVAILABLE,
+                "The selected delivery option cannot be paid for on delivery.",
+            )
 
     grand_total = discounted_subtotal + tax_total + shipping_total + cod_fee
 
@@ -94,7 +129,19 @@ def calculate_totals(*, cart, address, shipping_method_id, payment_method: str, 
 
 
 @transaction.atomic
-def create_order_from_cart(*, user, cart, address, shipping_method_id, payment_method: str, coupon_code: str = "", notes: str = ""):
+def create_order_from_cart(
+    *, user, cart, address, shipping_method_id, payment_method: str, coupon_code: str = "",
+    notes: str = "", idempotency_key: str = "",
+):
+    """
+    Turn the cart into an Order and start its payment.
+
+    `idempotency_key` is the checkout key from the request header. It is passed
+    down to the Payment so that a retry which slips past the cache-backed
+    mixin — because the cache was flushed, or because two requests raced — still
+    cannot produce a second charge: the Payment table has a unique constraint on
+    it.
+    """
     from apps.inventory.services import reserve_stock
     from apps.orders.services import generate_order_number
     from apps.shipping.models import ShippingMethod
@@ -145,24 +192,38 @@ def create_order_from_cart(*, user, cart, address, shipping_method_id, payment_m
             line_total=item.line_total,
         )
 
-    provider_code = PAYMENT_METHOD_PROVIDER_MAP.get(payment_method)
-    if not provider_code:
-        raise ApplicationError(ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE, f"Payment method '{payment_method}' is not supported.")
-
+    from apps.payments import config as payment_config
     from apps.payments.services import create_payment_for_order
 
+    provider_code = payment_config.gateway_for_method(payment_method)
+
     try:
-        payment = create_payment_for_order(order=order, provider_code=provider_code, method=payment_method)
+        payment = create_payment_for_order(
+            order=order,
+            provider_code=provider_code,
+            method=payment_method,
+            idempotency_key=idempotency_key,
+        )
     except NotImplementedError as exc:
-        raise ApplicationError(ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE, str(exc)) from exc
+        # A disabled or unconfigured gateway. The adapter's message names our
+        # own settings, so it is logged rather than returned to the customer.
+        logger.warning("checkout: gateway '%s' unavailable: %s", provider_code, exc)
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+            "That payment method is not available at the moment. Please choose another.",
+        ) from exc
 
     cart.status = CartStatus.CONVERTED
     cart.save(update_fields=["status"])
 
     if payment_method == PaymentMethodSnapshot.COD:
-        from apps.payments.services import mark_payment_captured
-
-        mark_payment_captured(payment)
+        # A COD order is confirmed but NOT paid. It used to be captured right
+        # here, which said the money was ours before a courier had left the
+        # building — and, because `captured` is the state refunds are issued
+        # from, made it possible to "refund" cash nobody had collected. The
+        # capture now happens in payments.services.record_cod_collection when
+        # somebody records the collection.
+        confirm_order(order, payment_received=False)
         payment.refresh_from_db()
         order.refresh_from_db()
 
@@ -171,6 +232,21 @@ def create_order_from_cart(*, user, cart, address, shipping_method_id, payment_m
 
 @transaction.atomic
 def confirm_order_after_payment(order: Order):
+    """The money arrived. Confirm the order and tell the customer both things."""
+    return confirm_order(order, payment_received=True)
+
+
+@transaction.atomic
+def confirm_order(order: Order, *, payment_received: bool = True):
+    """
+    Move a paid-or-promised order into CONFIRMED and do the work that follows.
+
+    `payment_received=False` is the cash-on-delivery case: the order is real,
+    the stock is committed, the confirmation email goes out — but no "payment
+    received" email does, because no payment has been. Sending one anyway was
+    the visible half of the COD bug; a customer would be told we had their money
+    while the parcel had not left.
+    """
     from apps.inventory.models import StockReservation, StockReservationStatus
     from apps.inventory.services import consume_reservation
     from apps.notifications.tasks import send_email_task
@@ -196,11 +272,12 @@ def confirm_order_after_payment(order: Order):
         context={"order_number": order.order_number, "total": str(order.grand_total.amount), "currency": order.currency},
         event="order_created", user_id=order.user_id,
     )
-    send_email_task.delay(
-        to=order.customer_email, subject="Payment received", template_name="payment_confirmation",
-        context={"order_number": order.order_number, "amount": str(order.grand_total.amount), "currency": order.currency},
-        event="payment_success", user_id=order.user_id,
-    )
+    if payment_received:
+        send_email_task.delay(
+            to=order.customer_email, subject="Payment received", template_name="payment_confirmation",
+            context={"order_number": order.order_number, "amount": str(order.grand_total.amount), "currency": order.currency},
+            event="payment_success", user_id=order.user_id,
+        )
 
     try:
         from apps.loyalty.services import award_points_for_order

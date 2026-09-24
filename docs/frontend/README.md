@@ -6,13 +6,23 @@ backend source (`apps/*/urls.py`, `apps/*/serializers.py`, `apps/core/*`) — en
 paths, field names and error codes are accurate as of this writing. If something looks
 off, the source of truth is always the Python code, not this file.
 
-See also:
-- [`QUICKSTART.md`](./QUICKSTART.md) — a step-by-step walkthrough (login → browse →
-  cart → checkout → COD order) with real request bodies.
-- [`types.ts`](./types.ts) — TypeScript interfaces for every request/response shape
-  described below.
-- [`../../frontend-sdk/`](../../frontend-sdk/) — a small, real TypeScript API client
-  implementing everything in this document.
+## The rest of this folder
+
+Start wherever your question is:
+
+| Document | Read it when |
+|---|---|
+| [`SETUP.md`](./SETUP.md) | You need the API running on localhost, seeded, with test accounts. |
+| [`QUICKSTART.md`](./QUICKSTART.md) | You want a step-by-step walkthrough — login → browse → cart → checkout → COD order — with real request bodies. |
+| **This file** | You want the narrative explanation of a domain. |
+| [`ENDPOINTS.md`](./ENDPOINTS.md) | You need the one-line answer: what's the path, is it paginated, does it need auth. |
+| [`ERROR-HANDLING.md`](./ERROR-HANDLING.md) | You're writing the auth interceptor, a form, or the checkout submit handler. **Read the 401 section before the interceptor.** |
+| [`STATES.md`](./STATES.md) | You need to know which buttons to show for an order, or what a status value means. |
+| [`PAYMENTS.md`](./PAYMENTS.md) | You're building checkout or a payment return page. Says which methods actually work today. |
+| [`DATA-FETCHING.md`](./DATA-FETCHING.md) | You're setting up React Query / SSR and want cache keys and invalidation worked out. |
+| [`I18N.md`](./I18N.md) | You're doing Arabic, RTL, money or date formatting. |
+| [`types.ts`](./types.ts) | You want the TypeScript interface for a payload. |
+| [`../../frontend-sdk/`](../../frontend-sdk/) | You'd rather use a ready-made client than write fetch calls. |
 
 ## Base URL
 
@@ -194,14 +204,23 @@ refresh token is dead — force a full logout/re-login.
 ### Automatic 401 handling
 
 Attach `Authorization: Bearer <access>` to every authenticated request. When a request
-gets back `401` with `errors.code` of `AUTH_TOKEN_EXPIRED` or `AUTH_TOKEN_INVALID`:
+comes back **`401`** — branch on the HTTP status, not on `errors.code`:
 1. Call `/auth/token/refresh/` once (queue/dedupe concurrent 401s so you don't fire N
    parallel refresh calls).
 2. Retry the original request with the new access token.
 3. If refresh itself fails, clear stored tokens and redirect to login.
 
-`frontend-sdk/api-client.ts` implements this exact flow via an axios response
-interceptor.
+> **Don't gate this on `AUTH_TOKEN_EXPIRED` / `AUTH_TOKEN_INVALID`.** Those two codes
+> are only raised by `/auth/token/refresh/` and `/auth/logout/`, which validate a
+> *refresh* token explicitly. An expired **access** token is rejected by SimpleJWT's
+> `InvalidToken`, which isn't in `_DRF_CODE_MAP` (`apps/core/exceptions.py`) and so
+> comes back as `401` with `errors.code: "VALIDATION_ERROR"`. A code-gated interceptor
+> never fires and logs the user out every 15 minutes. Full breakdown in
+> [`ERROR-HANDLING.md`](./ERROR-HANDLING.md#the-401-rule-read-this-before-writing-the-auth-interceptor).
+
+`frontend-sdk/api-client.ts` implements this flow via an axios response interceptor, but
+still uses the narrower code-based condition (line 174) — widen it to a plain status
+check.
 
 ### Logout
 
@@ -413,7 +432,9 @@ Both endpoints take the same body (`CheckoutInput`):
 }
 ```
 
-`payment_method` is one of `card | fawry_pay | mobile_wallet | valu | sympl | aman | cod`
+`payment_method` is one of `card | mobile_wallet | instapay | cod` — but do not
+hard-code that list: ask `GET /payments/methods/`, which returns only what this
+installation can complete
 (`coupon_code` and `notes` are optional, default `""`).
 
 1. `POST /api/v1/checkout/summary/` (`IsAuthenticated`) — **preview only**, does not
@@ -479,7 +500,7 @@ Order status values and the exact allowed transitions are in
 
 ### Recommended polling pattern after redirect-based payment
 
-After the user returns from a card/Fawry/wallet gateway redirect, poll
+After the user returns from a card or wallet gateway redirect, poll
 `GET /api/v1/payments/{id}/status/` every ~2s until `status` is `captured`, `failed`,
 `cancelled`, or `expired`, with a reasonable timeout (~2 minutes) after which you tell
 the user to check their orders page later (the webhook may still be in flight). See

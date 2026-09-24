@@ -17,6 +17,7 @@ from apps.gift_cards.serializers import (
 @extend_schema(tags=["Gift Cards"], request=GiftCardCheckSerializer)
 class GiftCardCheckView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "gift_card"
 
     def post(self, request):
         serializer = GiftCardCheckSerializer(data=request.data)

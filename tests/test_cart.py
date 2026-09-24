@@ -65,15 +65,31 @@ def test_remove_item_from_cart(authenticated_client, product_with_variant_and_st
     assert response.json()["data"]["items"] == []
 
 
-def test_cart_merge_sums_quantities_for_same_variant(api_client, authenticated_client, product_with_variant_and_stock):
+def test_cart_merge_sums_quantities_for_same_variant(api_client, user, product_with_variant_and_stock):
+    """One browser: shop as a guest, sign in, keep the basket.
+
+    The merge is driven by a single client throughout, because that is the
+    real flow and because it is now also the rule — a guest cart can only be
+    claimed from the session that built it (see
+    tests/test_security_authz.py::test_cart_merge_will_not_claim_a_guest_cart_from_another_session).
+    """
+    from rest_framework_simplejwt.tokens import RefreshToken
+
     variant = product_with_variant_and_stock["variant"]
 
     guest_response = api_client.post(CART_ITEMS_URL, {"variant_id": variant.id, "quantity": 3}, format="json")
     guest_cart_id = guest_response.json()["data"]["id"]
 
-    authenticated_client.post(CART_ITEMS_URL, {"variant_id": variant.id, "quantity": 2}, format="json")
+    # The customer already had two of the same jar waiting in their account.
+    from apps.carts.models import Cart, CartStatus
+    from apps.carts.services import add_item
 
-    merge_response = authenticated_client.post(CART_MERGE_URL, {"guest_cart_id": guest_cart_id}, format="json")
+    user_cart, _ = Cart.objects.get_or_create(user=user, status=CartStatus.OPEN)
+    add_item(user_cart, variant_id=variant.id, quantity=2)
+
+    # Same client, so the same session cookie — now carrying the token.
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(user).access_token}")
+    merge_response = api_client.post(CART_MERGE_URL, {"guest_cart_id": guest_cart_id}, format="json")
 
     assert merge_response.status_code == 200
     items = merge_response.json()["data"]["items"]

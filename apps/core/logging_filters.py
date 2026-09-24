@@ -3,8 +3,15 @@ import logging
 import re
 import time
 
+# Anything whose key matches this is never logged and never stored in a
+# PaymentTransaction.raw_response. The payment-provider entries are as
+# important as the auth ones: a provider `signature` or a Paymob `hmac` in our
+# database is a forgery oracle, and `pan`/`source_data` can carry card data
+# even when the provider believes it masked them.
 SENSITIVE_KEYS = re.compile(
-    r"(password|token|secret|authorization|api[_-]?key|cvv|card[_-]?number|hmac|access[_-]?token|refresh[_-]?token)",
+    r"(password|token|secret|authorization|api[_-]?key|cvv|cvc|card[_-]?number"
+    r"|hmac|access[_-]?token|refresh[_-]?token"
+    r"|signature|secure[_-]?key|pan|source_data|iban|account[_-]?number)",
     re.IGNORECASE,
 )
 REDACTED = "***REDACTED***"

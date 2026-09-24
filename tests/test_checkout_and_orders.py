@@ -50,15 +50,64 @@ def test_full_cod_checkout_confirms_order_and_decrements_inventory(
     assert order_data["items"][0]["quantity"] == 2
     assert order_data["items"][0]["sku_snapshot"] == variant.sku
 
+    # A COD order is confirmed but NOT paid. Nobody has collected any cash yet,
+    # and this assertion used to say CAPTURED — which is how the bug survived:
+    # the test agreed with the code that money we did not have was ours.
     assert payment_data["provider"] == "cod"
-    assert payment_data["status"] == PaymentStatus.CAPTURED
+    assert payment_data["status"] == PaymentStatus.PENDING
 
     payment = Payment.objects.get(pk=payment_data["id"])
     assert payment.provider == "cod"
-    assert payment.status == PaymentStatus.CAPTURED
+    assert payment.status == PaymentStatus.PENDING
+    # The customer is told what to have ready at the door.
+    assert payment.metadata["collect_amount"]
 
+    # Stock is still committed: the order is real, so the honey is spoken for.
     batch.refresh_from_db()
-    assert batch.quantity == 8  # 10 - 2, consumed on auto-confirm
+    assert batch.quantity == 8  # 10 - 2, consumed on confirmation
+
+
+def test_cod_payment_is_captured_when_the_order_is_delivered(
+    authenticated_client, product_with_variant_and_stock, address, shipping_setup,
+):
+    """
+    The other half of COD: delivery is when the cash becomes ours.
+
+    Walks the order through the real status machine rather than calling the
+    payment service directly, because the thing worth protecting is that *any*
+    route to DELIVERED collects the cash — the hook is on the transition, not on
+    one dashboard button.
+    """
+    from apps.orders.models import OrderStatus as OS
+    from apps.orders.services import transition_status
+
+    variant = product_with_variant_and_stock["variant"]
+    method = shipping_setup["method"]
+    _add_to_cart(authenticated_client, variant, quantity=1)
+
+    response = authenticated_client.post(
+        "/api/v1/checkout/",
+        {"address_id": address.id, "shipping_method_id": method.id, "payment_method": "cod"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+    )
+    assert response.status_code == 201
+    order = Order.objects.get(order_number=response.json()["data"]["order"]["order_number"])
+    payment = Payment.objects.get(order=order)
+    assert payment.status == PaymentStatus.PENDING
+
+    for status in (OS.PROCESSING, OS.PACKED, OS.SHIPPED, OS.DELIVERED):
+        order = transition_status(order, status)
+
+    payment.refresh_from_db()
+    assert payment.status == PaymentStatus.CAPTURED
+    # And it is idempotent: re-running the collection changes nothing.
+    from apps.payments.services import record_cod_collection
+
+    record_cod_collection(payment)
+    payment.refresh_from_db()
+    assert payment.status == PaymentStatus.CAPTURED
+    assert payment.refunds.count() == 0
 
 
 def test_checkout_retry_with_same_idempotency_key_returns_same_order(

@@ -61,6 +61,7 @@ class CartItemDetailView(APIView):
 @extend_schema(tags=["Cart"], request=ApplyCouponSerializer, responses=CartSerializer)
 class CartApplyCouponView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "coupon"
 
     def post(self, request):
         serializer = ApplyCouponSerializer(data=request.data)
@@ -84,7 +85,16 @@ class CartApplyCouponView(APIView):
 @extend_schema(tags=["Cart"], responses=CartSerializer)
 class CartMergeView(APIView):
     """Called right after login with the anonymous session's cart id, per
-    docs/frontend/README.md merge flow (spec §24)."""
+    docs/frontend/README.md merge flow (spec §24).
+
+    The id in the body is not on its own proof of anything. The customer who
+    is allowed to claim a guest cart is the one still sitting in the session
+    that built it, and this request carries that session in its cookie — so
+    the cart is matched on the session key as well as the id. Without that,
+    any signed-in account that came by a cart id (a log line, an analytics
+    payload, a shared screenshot — the id is in every cart response) could
+    claim a stranger's basket, coupon and all.
+    """
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -92,11 +102,17 @@ class CartMergeView(APIView):
         from apps.carts.models import Cart, CartStatus
 
         guest_cart_id = request.data.get("guest_cart_id")
-        if not guest_cart_id:
+        session_key = request.session.session_key
+        if not guest_cart_id or not session_key:
             cart = services.get_or_create_cart(request)
             return success_response(CartSerializer(cart).data)
 
-        guest_cart = Cart.objects.filter(pk=guest_cart_id, status=CartStatus.OPEN, user__isnull=True).first()
+        guest_cart = Cart.objects.filter(
+            pk=guest_cart_id,
+            status=CartStatus.OPEN,
+            user__isnull=True,
+            session_key=session_key,
+        ).first()
         if not guest_cart:
             cart = services.get_or_create_cart(request)
             return success_response(CartSerializer(cart).data)

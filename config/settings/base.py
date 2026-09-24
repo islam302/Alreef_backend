@@ -69,6 +69,8 @@ LOCAL_APPS = [
     "apps.search",
     "apps.analytics",
     "apps.audit",
+    "apps.content",
+    "apps.admin_api",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -153,6 +155,13 @@ USE_TZ = True
 
 DEFAULT_COUNTRY = "EG"
 DEFAULT_CURRENCY = "EGP"
+
+# Egyptians write their mobile number as 01xxxxxxxxx, which is what both
+# frontends ask for. Without a default region, phonenumber_field only accepts
+# E.164 (+201xxxxxxxxx) and rejects the format the form itself prompts for —
+# so nobody could save an address or register a phone. Stored in E.164.
+PHONENUMBER_DEFAULT_REGION = "EG"
+PHONENUMBER_DB_FORMAT = "E164"
 CURRENCIES = ["EGP", "USD"]
 
 # ---------------------------------------------------------------------------
@@ -206,8 +215,21 @@ REST_FRAMEWORK = {
         "auth_confirm": "10/min",
         "checkout": "30/min",
         "payment_webhook": "120/min",
+        # A customer waiting for a gateway to confirm polls this every
+        # couple of seconds, and each call can reach the provider, so it
+        # gets a budget of its own rather than eating the generic one.
+        "payment_status": "60/min",
         "search": "60/min",
         "review": "20/min",
+        "contact": "5/min",
+        # Code-guessing endpoints. The codes themselves are high-entropy, so
+        # these are not the only thing standing between an attacker and a
+        # balance — but an endpoint that answers "is this code real?" should
+        # never be reachable at the generic 300/min authenticated rate.
+        "gift_card": "10/min",
+        "coupon": "20/min",
+        # Anonymous, unauthenticated writes to the events table.
+        "analytics": "60/min",
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
@@ -267,6 +289,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "Gift Cards", "description": "Gift cards & store credit"},
         {"name": "Subscriptions", "description": "Recurring product subscriptions"},
         {"name": "Notifications", "description": "User notifications"},
+        {"name": "Content", "description": "Site content, contact details, pages and FAQ"},
         {"name": "Admin", "description": "Administrative operations"},
         {"name": "Webhooks", "description": "Inbound provider webhooks"},
         {"name": "Health", "description": "Health checks"},
@@ -342,8 +365,18 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 3600.0,  # hourly
     },
     "reconcile-pending-payments": {
+        # The safety net for a webhook that never arrived. Fifteen minutes is a
+        # compromise: fast enough that a customer who paid is confirmed while
+        # they still care, slow enough not to race callbacks that are merely in
+        # flight (the task also ignores anything younger than ten minutes).
         "task": "apps.payments.tasks.reconcile_pending_payments_task",
         "schedule": 900.0,  # every 15 minutes
+    },
+    "expire-stale-payments": {
+        # Closes out abandoned checkouts so the dashboard's "needs chasing"
+        # filter shows cases that need chasing rather than months of them.
+        "task": "apps.payments.tasks.expire_stale_payments_task",
+        "schedule": 86400.0,  # daily
     },
     "process-due-subscriptions": {
         "task": "apps.subscriptions.tasks.process_due_subscriptions_task",
@@ -408,37 +441,102 @@ WHATSAPP_ACCESS_TOKEN = config("WHATSAPP_ACCESS_TOKEN", default="")
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 
+# This API's own public origin. Payment providers call our webhook endpoints
+# out of band, so the URL we register with them must come from configuration
+# rather than from a request's Host header — see apps/payments/webhooks.py.
+BACKEND_PUBLIC_URL = config("BACKEND_PUBLIC_URL", default="http://localhost:8000")
+
 # ---------------------------------------------------------------------------
-# Payment providers (credentials only — no logic here). See apps.payments.
+# Payment providers
 # ---------------------------------------------------------------------------
+# Every external gateway is disabled by default and stays disabled until its
+# flag *and* all of its mandatory credentials are set — apps/payments/config.py
+# enforces that, so a half-filled block never reaches a customer. Run
+# `python manage.py check_payments` to see the state of each method.
+#
+# Webhook URLs to register with each provider are listed in
+# docs/payments/PROVIDERS.md. Never put a secret in a VITE_* variable: those
+# are compiled into the browser bundle.
 PAYMENT_PROVIDERS = {
+    # Paymob (Accept). The only real gateway. Serves card and mobile wallet
+    # today, and InstaPay too once Paymob enables it — at which point it is this
+    # settings block that changes, not any code.
+    # Credentials come from Dashboard -> Settings -> Account Info.
     "PAYMOB": {
         "ENABLED": config("PAYMOB_ENABLED", default=False, cast=bool),
+        # False keeps the adapter pointed at Paymob's test keys. It changes no
+        # URL — Paymob switches environment by key, not by host — but it is
+        # recorded on every payment so a live transaction created with a test
+        # key is visible rather than merely wrong.
+        "LIVE": config("PAYMOB_LIVE", default=False, cast=bool),
+        # Intention API (v1): `Authorization: Token <secret key>`.
+        "SECRET_KEY": config("PAYMOB_SECRET_KEY", default=""),
+        # Used to build the hosted checkout URL the customer is sent to.
+        "PUBLIC_KEY": config("PAYMOB_PUBLIC_KEY", default=""),
+        # Legacy Accept API key. Refund, void and transaction inquiry
+        # authenticate with this, not with the secret key.
         "API_KEY": config("PAYMOB_API_KEY", default=""),
-        "INTEGRATION_ID_CARD": config("PAYMOB_INTEGRATION_ID_CARD", default=""),
-        "INTEGRATION_ID_WALLET": config("PAYMOB_INTEGRATION_ID_WALLET", default=""),
-        "IFRAME_ID": config("PAYMOB_IFRAME_ID", default=""),
+        # Verifies every callback. Without it we cannot trust a payment
+        # notification, so config.py treats it as mandatory.
         "HMAC_SECRET": config("PAYMOB_HMAC_SECRET", default=""),
-        "BASE_URL": config("PAYMOB_BASE_URL", default="https://accept.paymob.com/api"),
+        # Visa / Mastercard / Meeza.
+        "INTEGRATION_ID_CARD": config("PAYMOB_INTEGRATION_ID_CARD", default=""),
+        # Vodafone Cash, Etisalat, Orange, WE.
+        "INTEGRATION_ID_WALLET": config("PAYMOB_INTEGRATION_ID_WALLET", default=""),
+        # Paymob lists InstaPay as coming soon. Leave this empty until it is
+        # live on your account: while it is empty, InstaPay is served by the
+        # manual-transfer route below, and setting it switches automatically.
+        "INTEGRATION_ID_INSTAPAY": config("PAYMOB_INTEGRATION_ID_INSTAPAY", default=""),
+        # Only needed for the legacy iframe display mode.
+        "IFRAME_ID": config("PAYMOB_IFRAME_ID", default=""),
+        "BASE_URL": config("PAYMOB_BASE_URL", default="https://accept.paymob.com"),
+        "TIMEOUT_SECONDS": config("PAYMOB_TIMEOUT_SECONDS", default=20, cast=int),
     },
-    "FAWRY": {
-        "ENABLED": config("FAWRY_ENABLED", default=False, cast=bool),
-        "MERCHANT_CODE": config("FAWRY_MERCHANT_CODE", default=""),
-        "SECURITY_KEY": config("FAWRY_SECURITY_KEY", default=""),
-        "BASE_URL": config("FAWRY_BASE_URL", default="https://atfawry.fawrystaging.com"),
+    # InstaPay, as a bank transfer the customer makes and staff confirm.
+    #
+    # There is no API here and there is no API to have: InstaPay is the Central
+    # Bank of Egypt's instant transfer network, not a payment gateway, and it
+    # publishes no merchant acceptance API. This is how Egyptian shops are paid
+    # by InstaPay today — publish an address, take the transfer, confirm it.
+    # See docs/payments/instapay.md.
+    "INSTAPAY": {
+        "ENABLED": config("INSTAPAY_ENABLED", default=False, cast=bool),
+        # The shop's InstaPay address (IPA), e.g. alreef@instapay. Shown to
+        # customers — it is a published payment address, not a credential.
+        "ADDRESS": config("INSTAPAY_ADDRESS", default=""),
+        # The account name the customer will see in their banking app, so a
+        # cautious customer can check it matches before transferring.
+        "ACCOUNT_NAME": config("INSTAPAY_ACCOUNT_NAME", default=""),
+        # How long the order waits for the transfer before staff should chase it.
+        "CONFIRM_WINDOW_HOURS": config("INSTAPAY_CONFIRM_WINDOW_HOURS", default=24, cast=int),
     },
-    "VALU": {
-        "ENABLED": config("VALU_ENABLED", default=False, cast=bool),
-        "API_KEY": config("VALU_API_KEY", default=""),
-        "BASE_URL": config("VALU_BASE_URL", default=""),
-    },
+    # Cash on delivery. No external API: the courier collects, and staff mark
+    # it collected. Every number here is configurable because they are
+    # commercial decisions, not code.
     "COD": {
         "ENABLED": config("COD_ENABLED", default=True, cast=bool),
         "FEE_AMOUNT": config("COD_FEE_AMOUNT", default="15.00"),
         "MIN_ORDER_AMOUNT": config("COD_MIN_ORDER_AMOUNT", default="0.00"),
+        # 0 means no ceiling.
         "MAX_ORDER_AMOUNT": config("COD_MAX_ORDER_AMOUNT", default="50000.00"),
+        # Comma-separated ShippingMethod ids. Empty means any method, which is
+        # right until a carrier that will not handle cash is added.
+        "ALLOWED_SHIPPING_METHOD_IDS": config("COD_ALLOWED_SHIPPING_METHOD_IDS", default=""),
     },
 }
+
+# How stale a webhook may be before it is recorded but not applied. Providers
+# retry for hours, so an event about a payment we have since moved on from is
+# normal; applying it blindly would walk the payment backwards.
+PAYMENT_WEBHOOK_MAX_AGE_HOURS = config("PAYMENT_WEBHOOK_MAX_AGE_HOURS", default=72, cast=int)
+
+# Currencies the payment layer will accept. Anything else is rejected before a
+# provider is contacted.
+PAYMENT_ALLOWED_CURRENCIES = [
+    code.strip().upper()
+    for code in config("PAYMENT_ALLOWED_CURRENCIES", default="EGP").split(",")
+    if code.strip()
+]
 
 # ---------------------------------------------------------------------------
 # Shipping providers
@@ -458,6 +556,16 @@ SHIPPING_PROVIDERS = {
 }
 
 EGYPT_VAT_RATE = Decimal(config("EGYPT_VAT_RATE", default="0.14"))
+
+# The OpenAPI schema documents every route, admin ones included — a complete
+# map of the back office, served to anyone who types the URL. It is genuinely
+# useful in development and on a staging box, so it stays a switch rather than
+# a deletion; it just defaults to off wherever DEBUG is off.
+#
+# Staff-gating it instead does not work here: DRF authenticates with JWT only,
+# so a signed-in staff member browsing to /api/docs/ would be rejected like
+# anyone else and the page would be broken rather than protected.
+API_DOCS_ENABLED = config("API_DOCS_ENABLED", default=DEBUG, cast=bool)
 
 SITE_NAME = config("SITE_NAME", default="Alreef")
 IDEMPOTENCY_KEY_TTL_SECONDS = config("IDEMPOTENCY_KEY_TTL_SECONDS", default=86400, cast=int)
