@@ -68,9 +68,12 @@ jobs:
       DB_USER: alreef
       DB_PASSWORD: alreef
       REDIS_URL: redis://localhost:6379/0
-      # A throwaway value for CI only. Production refuses to boot on the
-      # insecure default, which is checked in the deploy-check job below.
-      SECRET_KEY: ci-test-secret-key
+      # A throwaway value for CI only — production refuses to boot on the
+      # insecure default, which the deploy-check job below asserts. Long enough
+      # that PyJWT does not warn on every token: under 32 bytes it is genuinely
+      # too short for HS256, and a log full of that warning trains people to
+      # ignore it.
+      SECRET_KEY: ci-only-not-a-real-key-0000000000000000
 
     steps:
       - uses: actions/checkout@v4
@@ -203,7 +206,7 @@ jobs:
       DB_NAME: alreef
       DB_USER: alreef
       DB_PASSWORD: alreef
-      SECRET_KEY: ci-test-secret-key
+      SECRET_KEY: ci-only-not-a-real-key-0000000000000000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
