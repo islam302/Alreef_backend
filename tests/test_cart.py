@@ -34,6 +34,17 @@ def test_add_item_to_cart_guest(api_client, product_with_variant_and_stock):
     assert detail.json()["data"]["items"][0]["quantity"] == 2
 
 
+def test_cart_item_carries_the_arabic_product_name(api_client, product_with_variant_and_stock):
+    variant = product_with_variant_and_stock["variant"]
+
+    response = api_client.post(CART_ITEMS_URL, {"variant_id": variant.id, "quantity": 1}, format="json")
+
+    item = response.json()["data"]["items"][0]
+    assert item["product_name_ar"] == "عسل السدر"
+    # The existing field is unchanged for anything that already reads it.
+    assert item["product_name"] == "Sidr Honey"
+
+
 def test_add_item_to_cart_authenticated(authenticated_client, product_with_variant_and_stock):
     variant = product_with_variant_and_stock["variant"]
 

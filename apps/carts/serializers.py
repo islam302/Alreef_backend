@@ -8,11 +8,14 @@ from apps.catalog.serializers import ProductVariantSerializer
 class CartItemSerializer(serializers.ModelSerializer):
     variant = ProductVariantSerializer(read_only=True)
     product_name = serializers.CharField(source="variant.product.name_en", read_only=True)
+    # The storefront is Arabic-first; `product_name` stays as it was for any
+    # existing consumer, and this is the name the shop actually displays.
+    product_name_ar = serializers.CharField(source="variant.product.name_ar", read_only=True)
     line_total = serializers.SerializerMethodField()
 
     class Meta:
         model = CartItem
-        fields = ["id", "variant", "product_name", "quantity", "unit_price_snapshot", "line_total"]
+        fields = ["id", "variant", "product_name", "product_name_ar", "quantity", "unit_price_snapshot", "line_total"]
 
     def get_line_total(self, obj):
         return str(obj.line_total.amount)
