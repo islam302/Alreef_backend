@@ -4,16 +4,18 @@ from rest_framework.generics import ListAPIView
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.views import APIView
 
-from apps.catalog.models import Product
+from apps.catalog.models import Product, ProductStatus
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
 from apps.core.schema import envelope
 from apps.core.validators import validate_image_file
 from apps.reviews import services
 from apps.reviews.models import Review, ReviewImage
-from apps.reviews.serializers import ReviewCreateSerializer, ReviewSerializer
+from apps.reviews.serializers import LatestReviewSerializer, ReviewCreateSerializer, ReviewSerializer
 
 MAX_REVIEW_IMAGES = 5
+LATEST_REVIEWS_DEFAULT = 8
+LATEST_REVIEWS_MAX = 20
 
 
 @extend_schema(tags=["Reviews"])
@@ -28,6 +30,39 @@ class ProductReviewListView(ListAPIView):
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
+
+
+@extend_schema(tags=["Reviews"], responses=envelope(LatestReviewSerializer(many=True), name="LatestReviews"))
+class LatestReviewListView(APIView):
+    """
+    The newest approved reviews across the catalogue, for the homepage.
+
+    Only what moderation approved, only reviews with written text, only for
+    products a customer can still buy — and never more than 20. A plain list,
+    not paginated: it is a showcase, not an archive (the full set stays on each
+    product's own reviews endpoint).
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", LATEST_REVIEWS_DEFAULT))
+        except ValueError:
+            limit = LATEST_REVIEWS_DEFAULT
+        limit = max(1, min(limit, LATEST_REVIEWS_MAX))
+        reviews = (
+            Review.objects.filter(
+                approved=True,
+                product__published=True,
+                product__status=ProductStatus.ACTIVE,
+            )
+            .exclude(comment="")
+            .select_related("user", "product")
+            .prefetch_related("images")
+            .order_by("-created_at")[:limit]
+        )
+        return success_response(LatestReviewSerializer(reviews, many=True, context={"request": request}).data)
 
 
 @extend_schema(tags=["Reviews"], request=ReviewCreateSerializer, responses=envelope(ReviewSerializer, name="ReviewCreate"))

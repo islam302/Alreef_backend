@@ -13,7 +13,7 @@ Django admin). Paginated (see `docs/api/pagination.md`).
     "results": [
       {
         "id": 12,
-        "user_name": "Test Customer",
+        "user_name": "Test C.",
         "rating": 5,
         "title": "Excellent honey",
         "comment": "Rich flavor, arrived well packaged.",
@@ -28,6 +28,25 @@ Django admin). Paginated (see `docs/api/pagination.md`).
   "errors": null
 }
 ```
+
+`user_name` is the reviewer's first name and last initial ("محمد أ."). A
+reviewer with no first name is shown as "عميل الريف" — never by email, which
+`User.full_name` falls back to.
+
+## Latest reviews — `GET /api/v1/reviews/latest/`
+
+Public. The newest approved reviews **that have written text**, across every
+product that is published and active — the homepage's social proof. A plain
+list (not paginated), newest first; `?limit=` 1–20, default 8. Each item is
+the object above plus the product it is about:
+
+```json
+{ "id": 12, "user_name": "محمد أ.", "rating": 5, "comment": "…", "verified_purchase": true,
+  "product": { "name_ar": "عسل نحل برسيم حجازي", "name_en": "Alfalfa Honey", "slug": "asal-barseem-hegazy" }, "…": "…" }
+```
+
+`verified_purchase` is only ever true for a review written against a
+delivered order (see "Create a review" below), so it can be shown as such.
 
 ## Create a review — `POST /api/v1/reviews/`
 
