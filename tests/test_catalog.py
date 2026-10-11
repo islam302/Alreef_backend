@@ -117,6 +117,46 @@ def test_product_filter_by_price_range(api_client, product_with_variant_and_stoc
     assert expensive_product.slug not in slugs
 
 
+def test_product_filter_by_badge_returns_only_marked_products(api_client, category, brand):
+    marked = _make_product(category, brand, slug="best-honey", sku="HONEY-BEST-001", badges=["BEST_SELLER"])
+    plain = _make_product(category, brand, slug="plain-honey", sku="HONEY-PLAIN-001")
+
+    response = api_client.get(PRODUCTS_URL, {"badge": "best_seller"})
+
+    slugs = {p["slug"] for p in response.json()["data"]["results"]}
+    assert marked.slug in slugs
+    assert plain.slug not in slugs
+
+
+def test_product_filter_by_unknown_or_computed_badge_matches_nothing(api_client, category, brand):
+    _make_product(category, brand, slug="best-honey", sku="HONEY-BEST-001", badges=["BEST_SELLER"])
+
+    for code in ("OUT_OF_STOCK", "nonsense"):
+        response = api_client.get(PRODUCTS_URL, {"badge": code})
+        assert response.status_code == 200
+        assert response.json()["data"]["results"] == []
+
+
+def test_product_filter_by_slugs_returns_the_named_products(api_client, category, brand):
+    first = _make_product(category, brand, slug="first-honey", sku="HONEY-FIRST-001")
+    second = _make_product(category, brand, slug="second-honey", sku="HONEY-SECOND-001")
+    other = _make_product(category, brand, slug="other-honey", sku="HONEY-OTHER-002")
+
+    response = api_client.get(PRODUCTS_URL, {"slugs": f"{first.slug}, {second.slug},missing"})
+
+    slugs = {p["slug"] for p in response.json()["data"]["results"]}
+    assert slugs == {first.slug, second.slug}
+    assert other.slug not in slugs
+
+
+def test_product_filter_by_slugs_never_exposes_unpublished_products(api_client, category, brand):
+    hidden = _make_product(category, brand, slug="hidden-honey", sku="HONEY-HIDDEN-001", published=False)
+
+    response = api_client.get(PRODUCTS_URL, {"slugs": hidden.slug})
+
+    assert response.json()["data"]["results"] == []
+
+
 def test_search_endpoint_finds_product_by_name(api_client, product_with_variant_and_stock):
     response = api_client.get(SEARCH_URL, {"q": "Sidr"})
 

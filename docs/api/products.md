@@ -48,6 +48,8 @@ Query params (`ProductFilter`, `apps/catalog/filters.py`):
 | `attribute` | string | format `"code:value_slug"`, e.g. `weight:500g` — matches product- or variant-level attribute values |
 | `on_sale` | bool | `compare_at_price` set and `price < compare_at_price` |
 | `featured` | bool | `featured=True` |
+| `badge` | str | Products carrying that stored badge (`NEW`, `BEST_SELLER`, `SALE`, `LIMITED`, `ORGANIC`, `FEATURED`, case-insensitive). Computed badges (`OUT_OF_STOCK`, `LOW_STOCK`) and unknown codes match nothing. |
+| `slugs` | str | Comma-separated slugs, at most 24 — a curated shelf such as a homepage section set in the dashboard. Unknown slugs are ignored; unpublished products are never returned. |
 | `product_type` | string | `simple\|variable\|bundle\|mix_and_match\|subscription` |
 | `search` | string | full-text-ish `icontains` search (DRF `SearchFilter`) |
 | `ordering` | string | see above |
