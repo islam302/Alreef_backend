@@ -10,6 +10,7 @@ dashboard and the storefront can never disagree about what is legal.
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
 from django.db.models import Count, DecimalField, F, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -316,9 +317,24 @@ class AdminProductViewSet(EnvelopeViewSet):
         product = self.get_object()
         serializer = AdminProductVariantSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        variant = serializer.save(product=product)
-        get_or_create_item(variant)
-        self._audit(AuditAction.CREATE, product, {"variant_added": variant.sku})
+        # Optional starting stock, so a new size can be sold the moment it is
+        # saved. It goes in as an ordinary adjustment — a batch and a movement
+        # in the history — never as a number written straight onto the row.
+        try:
+            initial_stock = int(request.data.get("initial_stock") or 0)
+        except (TypeError, ValueError):
+            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, "initial_stock must be a whole number.")
+        if initial_stock < 0:
+            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, "initial_stock cannot be negative.")
+        with transaction.atomic():
+            variant = serializer.save(product=product)
+            item = get_or_create_item(variant)
+            if initial_stock:
+                admin_services.adjust_stock(
+                    item=item, quantity_delta=initial_stock, reason="رصيد أول (وزن جديد)",
+                    notes="", batch_number="", expiration_date=None, actor=request.user,
+                )
+        self._audit(AuditAction.CREATE, product, {"variant_added": variant.sku, "initial_stock": initial_stock})
         return success_response(AdminProductVariantSerializer(variant).data, message="Variant created.", status=201)
 
 
@@ -473,7 +489,9 @@ class AdminInventoryViewSet(ReadOnlyEnvelopeViewSet):
             actor=request.user,
         )
         self._audit(AuditAction.UPDATE, item, {"quantity_delta": data["quantity_delta"], "reason": data["reason"]})
-        item.refresh_from_db()
+        # The list's totals are SQL annotations; refresh_from_db() leaves them as
+        # they were before the adjustment, so the dashboard showed the old count.
+        item = self.get_queryset().get(pk=item.pk)
         return success_response(
             {"movement": AdminInventoryMovementSerializer(movement).data,
              "item": AdminInventoryItemSerializer(item).data},
