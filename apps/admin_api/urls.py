@@ -36,6 +36,7 @@ router.register("inventory-movements", views.AdminInventoryMovementViewSet, base
 router.register("batches", views.AdminBatchViewSet, basename="admin-batch")
 router.register("coupons", views.AdminCouponViewSet, basename="admin-coupon")
 router.register("reviews", views.AdminReviewViewSet, basename="admin-review")
+router.register("store-reviews", views.AdminStoreReviewViewSet, basename="admin-store-review")
 router.register("payments", views.AdminPaymentViewSet, basename="admin-payment")
 router.register("audit-logs", views.AdminAuditLogViewSet, basename="admin-audit-log")
 router.register("staff", views.AdminStaffViewSet, basename="admin-staff")

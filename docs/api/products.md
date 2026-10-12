@@ -167,3 +167,29 @@ Example:
 ```
 
 Use `code` + a value's `slug` together as the `attribute` filter on `/products/` and `/search/`, e.g. `?attribute=weight:500g`.
+
+## Offers (staff) — `POST /api/v1/admin-api/products/{id}/offer/`
+
+Sets, changes or ends a product's offer in one call. A customer is charged
+the price of the size they buy, while cards and the homepage offers band read
+the product's own headline price — so this sets every size's pair and then
+copies the headline size's pair (the default size, else the first active one)
+onto the product. The two can never disagree.
+
+```json
+{ "variants": [ { "id": 8, "price": "304.00", "compare_at_price": "380.00" },
+                { "id": 9, "price": "182.40", "compare_at_price": "228.00" } ] }
+```
+
+- `compare_at_price` must be above `price`, or `null` to end the offer (400 otherwise).
+- A size of another product → 404, and nothing is saved.
+- A product with no sizes takes top-level `price` / `compare_at_price`.
+- Returns the full admin product. Audited.
+- `GET /admin-api/products/?on_sale=true` lists products on offer (same rule as the storefront).
+
+## SKU and barcode
+
+Both are optional on create. Left blank, a product gets `ELR-00012` and a
+size `ELR-00012-500G` (or `-V{id}` without a weight); each gets an internal
+EAN-13 barcode in the GS1 in-store range (`201…` products, `202…` sizes). A
+typed SKU or barcode is kept as entered. See `apps/catalog/codes.py`.

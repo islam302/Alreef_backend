@@ -3,6 +3,7 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from djmoney.models.fields import MoneyField
 
+from apps.catalog import codes
 from apps.core.models import BaseModel
 from apps.core.validators import validate_image_file
 
@@ -57,8 +58,9 @@ class Product(BaseModel):
     name_en = models.CharField(max_length=255)
     name_ar = models.CharField(max_length=255)
     slug = models.SlugField(max_length=280, unique=True)
-    sku = models.CharField(max_length=64, unique=True)
-    barcode = models.CharField(max_length=64, blank=True, db_index=True)
+    # Left blank, both are generated on save (apps.catalog.codes).
+    sku = models.CharField(max_length=64, unique=True, blank=True, help_text="Leave blank to generate one.")
+    barcode = models.CharField(max_length=64, blank=True, db_index=True, help_text="Leave blank to generate an internal EAN-13.")
 
     description = models.TextField(blank=True)
     short_description = models.CharField(max_length=500, blank=True)
@@ -105,6 +107,12 @@ class Product(BaseModel):
 
     def __str__(self):
         return self.name_en
+
+    def save(self, *args, **kwargs):
+        codes.fill_codes(
+            self, kind=codes.KIND_PRODUCT, make_sku=codes.product_sku,
+            save_super=super().save, args=args, kwargs=kwargs,
+        )
 
     @property
     def is_food(self) -> bool:
@@ -169,8 +177,9 @@ class ProductVariant(BaseModel):
     """A purchasable SKU, e.g. Sidr Honey 500g. Stock lives in apps.inventory."""
 
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="variants")
-    sku = models.CharField(max_length=64, unique=True)
-    barcode = models.CharField(max_length=64, blank=True, db_index=True)
+    # Left blank, both are generated on save (apps.catalog.codes).
+    sku = models.CharField(max_length=64, unique=True, blank=True, help_text="Leave blank to generate one.")
+    barcode = models.CharField(max_length=64, blank=True, db_index=True, help_text="Leave blank to generate an internal EAN-13.")
     name_suffix = models.CharField(max_length=150, blank=True, help_text='e.g. "500g" — appended to the product name')
 
     price = MoneyField(max_digits=12, decimal_places=2, default_currency="EGP")
@@ -192,6 +201,12 @@ class ProductVariant(BaseModel):
 
     def __str__(self):
         return f"{self.product.name_en} {self.name_suffix}".strip()
+
+    def save(self, *args, **kwargs):
+        codes.fill_codes(
+            self, kind=codes.KIND_VARIANT, make_sku=codes.variant_sku,
+            save_super=super().save, args=args, kwargs=kwargs,
+        )
 
 
 class VariantAttributeValue(BaseModel):

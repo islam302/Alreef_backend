@@ -220,3 +220,53 @@ def get_overview(days: int = 30) -> dict:
         "pending_reviews": Review.objects.filter(approved=False).count(),
     })
     return summary
+
+
+# --------------------------------------------------------------------------
+# Offers
+# --------------------------------------------------------------------------
+def headline_variant(product):
+    """The size a product's cards and the offers band show: the default one
+    while it is active, otherwise the first active size."""
+    variants = [v for v in product.variants.all() if v.is_active]
+    variants.sort(key=lambda v: (not v.is_default, v.sort_order, v.weight_grams or 0, v.pk))
+    return variants[0] if variants else None
+
+
+@transaction.atomic
+def set_offer(*, product, variant_prices: list[dict], price=None, compare_at_price=None) -> dict:
+    """
+    Put a product on offer, change its offer, or end it — in one step.
+
+    A customer is charged the price of the size they buy, while cards and the
+    homepage offers band read the product's own headline price. Changing one
+    without the other would show one price and charge another, so this sets
+    each size's price and "was" price, then copies the headline size's pair
+    onto the product. A product with no sizes takes `price` /
+    `compare_at_price` directly.
+
+    `compare_at_price` must be above `price` (a real cut) or empty (no offer).
+    Returns what changed, for the audit log.
+    """
+    by_id = {v.pk: v for v in product.variants.all()}
+    changed = {}
+    for row in variant_prices:
+        variant = by_id.get(row["id"])
+        if variant is None:
+            raise ApplicationError(ErrorCodes.NOT_FOUND, f"Size {row['id']} is not part of this product.")
+        variant.price = row["price"]
+        variant.compare_at_price = row.get("compare_at_price")
+        variant.save(update_fields=["price", "compare_at_price", "updated_at"])
+        changed[variant.sku] = [str(row["price"]), str(row.get("compare_at_price") or "")]
+
+    headline = headline_variant(product)
+    if headline is not None:
+        headline.refresh_from_db()
+        product.price = headline.price
+        product.compare_at_price = headline.compare_at_price
+    elif price is not None:
+        product.price = price
+        product.compare_at_price = compare_at_price
+    product.save(update_fields=["price", "compare_at_price", "updated_at"])
+    changed["product"] = [str(product.price.amount), str(product.compare_at_price.amount if product.compare_at_price else "")]
+    return changed

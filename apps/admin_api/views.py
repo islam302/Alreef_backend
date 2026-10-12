@@ -10,7 +10,7 @@ dashboard and the storefront can never disagree about what is legal.
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Count, DecimalField, Prefetch, Q, Sum
+from django.db.models import Count, DecimalField, F, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -48,9 +48,11 @@ from apps.admin_api.serializers import (
     AdminReturnRequestSerializer,
     AdminReviewSerializer,
     AdminStaffSerializer,
+    AdminStoreReviewSerializer,
     OrderCancelAdminSerializer,
     OrderNoteSerializer,
     OrderStatusChangeSerializer,
+    ProductOfferSerializer,
     ReturnDecisionSerializer,
     StockAdjustmentSerializer,
 )
@@ -66,7 +68,7 @@ from apps.inventory.services import get_expired_batches, get_or_create_item
 from apps.orders.models import Order, OrderStatus, ReturnRequest
 from apps.orders.services import complete_return_and_refund, decide_return_request, transition_status
 from apps.payments.models import Payment
-from apps.reviews.models import Review
+from apps.reviews.models import Review, StoreReview
 from apps.users.models import User
 
 
@@ -276,7 +278,27 @@ class AdminProductViewSet(EnvelopeViewSet):
             queryset = queryset.filter(published=params["published"] == "true")
         if params.get("featured") in {"true", "false"}:
             queryset = queryset.filter(featured=params["featured"] == "true")
+        # The same rule the storefront's offers band uses (catalog filters).
+        if params.get("on_sale") == "true":
+            queryset = queryset.filter(compare_at_price__isnull=False, price__lt=F("compare_at_price"))
         return queryset
+
+    @extend_schema(request=ProductOfferSerializer, responses=envelope(AdminProductSerializer, name="AdminProductOffer"))
+    @action(detail=True, methods=["post"], url_path="offer")
+    def offer(self, request, pk=None):
+        """Set, change or end a product's offer: every size's price and "was"
+        price, with the product's headline price kept equal to its main size."""
+        product = self.get_object()
+        serializer = ProductOfferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        changed = admin_services.set_offer(
+            product=product, variant_prices=data["variants"],
+            price=data.get("price"), compare_at_price=data.get("compare_at_price"),
+        )
+        self._audit(AuditAction.UPDATE, product, {"offer": changed})
+        product = self.get_queryset().get(pk=product.pk)
+        return success_response(AdminProductSerializer(product, context=self.get_serializer_context()).data, message="Offer saved.")
 
     @action(detail=True, methods=["post"], url_path="images")
     def upload_image(self, request, pk=None):
@@ -574,6 +596,26 @@ class AdminReviewViewSet(DeletableEnvelopeViewSet):
         review.save(update_fields=["approved"])
         self._audit(AuditAction.UPDATE, review, {"approved": False})
         return success_response(self.get_serializer(review).data, message="Review hidden.")
+
+
+@extend_schema(tags=["Admin"])
+class AdminStoreReviewViewSet(EnvelopeViewSet):
+    """Opinions branch customers gave in person. Unlike online reviews these
+    have no author account, so staff record them — every write is audited,
+    and the serializer refuses to publish one without the customer's consent."""
+
+    serializer_class = AdminStoreReviewSerializer
+    audit_model_name = "StoreReview"
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["customer_name", "comment", "product__name_ar"]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        queryset = StoreReview.objects.select_related("product", "created_by")
+        published = self.request.query_params.get("published")
+        if published in {"true", "false"}:
+            queryset = queryset.filter(published=published == "true")
+        return queryset
 
 
 # ==========================================================================

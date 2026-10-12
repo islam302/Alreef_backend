@@ -10,8 +10,13 @@ from apps.core.response import success_response
 from apps.core.schema import envelope
 from apps.core.validators import validate_image_file
 from apps.reviews import services
-from apps.reviews.models import Review, ReviewImage
-from apps.reviews.serializers import LatestReviewSerializer, ReviewCreateSerializer, ReviewSerializer
+from apps.reviews.models import Review, ReviewImage, StoreReview
+from apps.reviews.serializers import (
+    LatestReviewSerializer,
+    LatestStoreReviewSerializer,
+    ReviewCreateSerializer,
+    ReviewSerializer,
+)
 
 MAX_REVIEW_IMAGES = 5
 LATEST_REVIEWS_DEFAULT = 8
@@ -35,12 +40,17 @@ class ProductReviewListView(ListAPIView):
 @extend_schema(tags=["Reviews"], responses=envelope(LatestReviewSerializer(many=True), name="LatestReviews"))
 class LatestReviewListView(APIView):
     """
-    The newest approved reviews across the catalogue, for the homepage.
+    The newest public customer opinions, for the homepage — from both places
+    customers buy:
 
-    Only what moderation approved, only reviews with written text, only for
-    products a customer can still buy — and never more than 20. A plain list,
-    not paginated: it is a showcase, not an archive (the full set stays on each
-    product's own reviews endpoint).
+    - `source: "online"` — approved reviews with written text, for products a
+      customer can still buy.
+    - `source: "in_store"` — opinions given at the branch, recorded by staff,
+      published only with the customer's consent.
+
+    Newest first (a branch opinion dates from the day it was given), never
+    more than 20. A plain list, not paginated: it is a showcase, not an
+    archive (the full set stays on each product's own reviews endpoint).
     """
 
     permission_classes = [permissions.AllowAny]
@@ -51,7 +61,7 @@ class LatestReviewListView(APIView):
         except ValueError:
             limit = LATEST_REVIEWS_DEFAULT
         limit = max(1, min(limit, LATEST_REVIEWS_MAX))
-        reviews = (
+        online = (
             Review.objects.filter(
                 approved=True,
                 product__published=True,
@@ -62,7 +72,20 @@ class LatestReviewListView(APIView):
             .prefetch_related("images")
             .order_by("-created_at")[:limit]
         )
-        return success_response(LatestReviewSerializer(reviews, many=True, context={"request": request}).data)
+        in_store = (
+            StoreReview.objects.filter(published=True, consent=True)
+            .exclude(comment="")
+            .select_related("product")
+            .order_by("-created_at")[:limit]
+        )
+        context = {"request": request}
+        rows = [(r.created_at.date(), r.created_at, LatestReviewSerializer(r, context=context).data) for r in online]
+        rows += [
+            (r.collected_on or r.created_at.date(), r.created_at, LatestStoreReviewSerializer(r, context=context).data)
+            for r in in_store
+        ]
+        rows.sort(key=lambda row: (row[0], row[1]), reverse=True)
+        return success_response([data for _, _, data in rows[:limit]])
 
 
 @extend_schema(tags=["Reviews"], request=ReviewCreateSerializer, responses=envelope(ReviewSerializer, name="ReviewCreate"))

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.reviews.models import Review, ReviewImage
+from apps.reviews.models import Review, ReviewImage, StoreReview
 
 
 class ReviewImageInline(admin.TabularInline):
@@ -20,3 +20,10 @@ class ReviewAdmin(admin.ModelAdmin):
     @admin.action(description="Approve selected reviews")
     def approve_reviews(self, request, queryset):
         queryset.update(approved=True)
+
+
+@admin.register(StoreReview)
+class StoreReviewAdmin(admin.ModelAdmin):
+    list_display = ["customer_name", "rating", "product", "collected_on", "consent", "published", "created_at"]
+    list_filter = ["published", "consent"]
+    search_fields = ["customer_name", "comment"]

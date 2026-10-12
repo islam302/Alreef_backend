@@ -5,6 +5,8 @@ These deliberately expose more than the storefront equivalents (cost price,
 internal notes, customer contact details, audit metadata) because every
 route that uses them is gated behind `IsAdminUser`.
 """
+import re
+
 from rest_framework import serializers
 
 from apps.audit.models import AuditLog
@@ -14,7 +16,7 @@ from apps.coupons.models import Coupon
 from apps.inventory.models import Batch, InventoryItem, InventoryMovement
 from apps.orders.models import Order, OrderItem, OrderStatusHistory, ReturnRequest
 from apps.payments.models import Payment, Refund
-from apps.reviews.models import Review
+from apps.reviews.models import Review, StoreReview
 from apps.users.models import User
 
 
@@ -291,6 +293,35 @@ class AdminProductVariantSerializer(serializers.ModelSerializer):
         return _stock_payload(getattr(obj, "inventory_item", None))
 
 
+class _OfferPriceMixin:
+    def validate(self, attrs):
+        price, was = attrs.get("price"), attrs.get("compare_at_price")
+        if was is not None and price is not None and was <= price:
+            raise serializers.ValidationError(
+                {"compare_at_price": "The price before the discount must be higher than the price."}
+            )
+        return attrs
+
+
+class OfferVariantPriceSerializer(_OfferPriceMixin, serializers.Serializer):
+    id = serializers.IntegerField()
+    price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+    compare_at_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=0, required=False, allow_null=True
+    )
+
+
+class ProductOfferSerializer(_OfferPriceMixin, serializers.Serializer):
+    """Prices for every size the offer changes. `price` / `compare_at_price`
+    only matter for a product with no sizes."""
+
+    variants = OfferVariantPriceSerializer(many=True, required=False, default=list)
+    price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0, required=False)
+    compare_at_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=0, required=False, allow_null=True
+    )
+
+
 class AdminProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name_ar", default="", read_only=True)
     brand_name = serializers.CharField(source="brand.name", default="", read_only=True)
@@ -511,6 +542,51 @@ class AdminReviewSerializer(serializers.ModelSerializer):
             "comment", "verified_purchase", "approved", "helpful_votes", "created_at",
         ]
         read_only_fields = ["product", "user", "rating", "title", "comment", "verified_purchase", "helpful_votes"]
+
+
+class AdminStoreReviewSerializer(serializers.ModelSerializer):
+    """An opinion a branch customer gave, written down by staff.
+
+    The name is what goes public, so it may not carry an email or a phone
+    number, and nothing is published without the customer's consent."""
+
+    product_name = serializers.CharField(source="product.name_ar", read_only=True, default="")
+    created_by_name = serializers.CharField(source="created_by.full_name", read_only=True, default="")
+
+    class Meta:
+        model = StoreReview
+        fields = [
+            "id", "customer_name", "comment", "rating", "product", "product_name", "collected_on",
+            "consent", "published", "created_by", "created_by_name", "created_at", "updated_at",
+        ]
+        read_only_fields = ["created_by", "created_at", "updated_at"]
+
+    def validate_customer_name(self, value):
+        value = " ".join(value.split())
+        if not value:
+            raise serializers.ValidationError("A name to show is required.")
+        if "@" in value or re.search(r"\d{4,}", value):
+            raise serializers.ValidationError("Use a first name and initial — never an email or a phone number.")
+        return value
+
+    def validate_comment(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("The customer's words are required.")
+        return value
+
+    def validate(self, attrs):
+        consent = attrs.get("consent", getattr(self.instance, "consent", False))
+        published = attrs.get("published", getattr(self.instance, "published", False))
+        if published and not consent:
+            raise serializers.ValidationError({"published": "Publish only with the customer's consent."})
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            validated_data["created_by"] = request.user
+        return super().create(validated_data)
 
 
 # --------------------------------------------------------------------------

@@ -35,18 +35,46 @@ reviewer with no first name is shown as "عميل الريف" — never by email
 
 ## Latest reviews — `GET /api/v1/reviews/latest/`
 
-Public. The newest approved reviews **that have written text**, across every
-product that is published and active — the homepage's social proof. A plain
-list (not paginated), newest first; `?limit=` 1–20, default 8. Each item is
-the object above plus the product it is about:
+Public. The homepage's social proof: the newest customer opinions from both
+places customers buy. A plain list (not paginated), newest first; `?limit=`
+1–20, default 8. Every item carries `source`:
+
+- `"online"` — an approved review **with written text**, for a product that
+  is published and active. The object above plus the product it is about.
+- `"in_store"` — an opinion a customer gave at the branch, recorded by staff
+  (see "Branch opinions" below). Shown only once published **and** the
+  customer consented.
 
 ```json
-{ "id": 12, "user_name": "محمد أ.", "rating": 5, "comment": "…", "verified_purchase": true,
+{ "id": 12, "source": "online", "user_name": "محمد أ.", "rating": 5, "comment": "…", "verified_purchase": true,
   "product": { "name_ar": "عسل نحل برسيم حجازي", "name_en": "Alfalfa Honey", "slug": "asal-barseem-hegazy" }, "…": "…" }
+{ "id": 3, "source": "in_store", "user_name": "أحمد م.", "rating": null, "comment": "…", "verified_purchase": false,
+  "title": "", "images": [], "helpful_votes": 0, "collected_on": "2026-10-02", "product": null, "created_at": "…" }
 ```
 
-`verified_purchase` is only ever true for a review written against a
-delivered order (see "Create a review" below), so it can be shown as such.
+`id` is unique within a `source`, not across sources — key on both.
+
+`verified_purchase` is only ever true for an online review written against a
+delivered order (see "Create a review" below), so it can be shown as such. A
+branch opinion is never marked verified, its `rating` is `null` unless the
+customer gave one, and its `product` is `null` when unknown or no longer on
+sale. A branch opinion sorts by `collected_on` (the day it was given) when set.
+
+## Branch opinions — `/api/v1/admin-api/store-reviews/` (staff)
+
+Full CRUD, `IsAdminUser`, every write audited. A branch customer has no
+account, so staff write down what they said:
+
+```json
+{ "customer_name": "أحمد م.", "comment": "…", "rating": null, "product": null,
+  "collected_on": "2026-10-02", "consent": true, "published": true }
+```
+
+- `customer_name` is published as-is: refused if it contains an email or a
+  run of 4+ digits (a phone number). Whitespace is collapsed.
+- `comment` is required. `rating`, `product`, `collected_on` are optional.
+- `published: true` is refused (400) unless `consent` is true.
+- `?published=true|false` filters; `?search=` searches name, text, product.
 
 ## Create a review — `POST /api/v1/reviews/`
 
