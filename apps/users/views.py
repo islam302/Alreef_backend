@@ -46,7 +46,7 @@ class RegisterView(APIView):
         user = serializer.save()
 
         token = services.issue_email_verification_token(user)
-        verify_url = f"{request._request.build_absolute_uri('/')[:-1]}/api/v1/auth/verify-email/confirm/?token={token}"
+        verify_url = frontend_url("/verify-email", token=token)
         send_email_task.delay(
             to=user.email, subject=_("Verify your email"), template_name="verify_email",
             context={"verify_url": verify_url, "first_name": user.first_name}, event="email_verification", user_id=user.id,

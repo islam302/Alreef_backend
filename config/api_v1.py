@@ -4,6 +4,7 @@ Aggregates all /api/v1/ routes. Each app owns its own urls.py.
 from django.urls import include, path
 
 urlpatterns = [
+    path("auth/social/", include("apps.social_auth.urls")),
     path("auth/", include("apps.users.urls_auth")),
     path("", include("apps.users.urls")),
     path("categories/", include("apps.categories.urls")),

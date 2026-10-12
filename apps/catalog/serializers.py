@@ -92,8 +92,10 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_in_stock(self, obj):
         variants = list(obj.variants.filter(is_active=True))
+        # A product with no size cannot go in a cart (cart lines are sizes), so
+        # it is not "in stock" — reporting True put a dead add button on cards.
         if not variants:
-            return True
+            return False
         return any(not get_or_create_item(v).is_out_of_stock for v in variants)
 
 

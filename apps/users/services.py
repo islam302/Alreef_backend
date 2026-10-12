@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
+from django.db import transaction
 from django.utils import timezone
 
 from apps.core.error_codes import ApplicationError, ErrorCodes
@@ -63,8 +64,14 @@ def issue_email_verification_token(user) -> str:
     return token
 
 
+@transaction.atomic
 def confirm_email_verification_token(token: str):
-    record = EmailVerificationToken.objects.filter(token=token, used_at__isnull=True).select_related("user").first()
+    record = (
+        EmailVerificationToken.objects.select_for_update()
+        .filter(token=token, used_at__isnull=True)
+        .select_related("user")
+        .first()
+    )
     if not record or record.expires_at < timezone.now():
         raise ApplicationError(ErrorCodes.AUTH_OTP_EXPIRED, "Verification link is invalid or has expired.")
     record.used_at = timezone.now()
@@ -81,8 +88,14 @@ def issue_password_reset_token(user) -> str:
     return token
 
 
+@transaction.atomic
 def confirm_password_reset(token: str, new_password: str):
-    record = PasswordResetToken.objects.filter(token=token, used_at__isnull=True).select_related("user").first()
+    record = (
+        PasswordResetToken.objects.select_for_update()
+        .filter(token=token, used_at__isnull=True)
+        .select_related("user")
+        .first()
+    )
     if not record or record.expires_at < timezone.now():
         raise ApplicationError(ErrorCodes.AUTH_OTP_EXPIRED, "Reset link is invalid or has expired.")
     record.used_at = timezone.now()

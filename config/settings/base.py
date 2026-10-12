@@ -71,6 +71,7 @@ LOCAL_APPS = [
     "apps.audit",
     "apps.content",
     "apps.admin_api",
+    "apps.social_auth",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -440,6 +441,15 @@ WHATSAPP_PHONE_NUMBER_ID = config("WHATSAPP_PHONE_NUMBER_ID", default="")
 WHATSAPP_ACCESS_TOKEN = config("WHATSAPP_ACCESS_TOKEN", default="")
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+
+# Sign in with Google / Facebook (apps.social_auth). Empty switches a provider
+# off: its button disappears from the storefront and its endpoint answers 404.
+# The Google client id and Facebook app id are public (they ship to the
+# browser); only the Facebook app secret is a secret.
+GOOGLE_OAUTH_CLIENT_ID = config("GOOGLE_OAUTH_CLIENT_ID", default="")
+FACEBOOK_APP_ID = config("FACEBOOK_APP_ID", default="")
+FACEBOOK_APP_SECRET = config("FACEBOOK_APP_SECRET", default="")
+FACEBOOK_GRAPH_VERSION = config("FACEBOOK_GRAPH_VERSION", default="v21.0")
 
 # This API's own public origin. Payment providers call our webhook endpoints
 # out of band, so the URL we register with them must come from configuration
