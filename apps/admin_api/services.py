@@ -228,9 +228,29 @@ def get_overview(days: int = 30) -> dict:
 def headline_variant(product):
     """The size a product's cards and the offers band show: the default one
     while it is active, otherwise the first active size."""
-    variants = [v for v in product.variants.all() if v.is_active]
+    # A fresh query, not .all(): a product loaded with its sizes prefetched
+    # would not see one added or changed a moment ago.
+    variants = list(product.variants.filter(is_active=True))
     variants.sort(key=lambda v: (not v.is_default, v.sort_order, v.weight_grams or 0, v.pk))
     return variants[0] if variants else None
+
+
+def sync_product_price(product):
+    """
+    Prices are set per size. The product's own price fields — what cards, the
+    offers band and search read — follow its headline size, so they never
+    disagree with what the cart charges. A product with no active size keeps
+    whatever it had (it is not sellable, and the storefront shows no price).
+    """
+    variant = headline_variant(product)
+    if variant is None:
+        return
+    fields = ("price", "compare_at_price", "cost_price")
+    changed = [f for f in fields if getattr(product, f) != getattr(variant, f)]
+    for f in changed:
+        setattr(product, f, getattr(variant, f))
+    if changed:
+        product.save(update_fields=[*changed, "updated_at"])
 
 
 @transaction.atomic

@@ -334,6 +334,7 @@ class AdminProductViewSet(EnvelopeViewSet):
                     item=item, quantity_delta=initial_stock, reason="رصيد أول (وزن جديد)",
                     notes="", batch_number="", expiration_date=None, actor=request.user,
                 )
+            admin_services.sync_product_price(product)
         self._audit(AuditAction.CREATE, product, {"variant_added": variant.sku, "initial_stock": initial_stock})
         return success_response(AdminProductVariantSerializer(variant).data, message="Variant created.", status=201)
 
@@ -362,6 +363,22 @@ class AdminProductVariantViewSet(EnvelopeViewSet):
     serializer_class = AdminProductVariantSerializer
     audit_model_name = "ProductVariant"
     queryset = ProductVariant.objects.select_related("product", "inventory_item")
+
+    # Prices live on sizes; the product's headline price follows them.
+    # (EnvelopeViewSet saves in update()/destroy() themselves, not through
+    # DRF's perform_* hooks, so those are what is wrapped here.)
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        admin_services.sync_product_price(self.get_object().product)
+        return response
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        product = self.get_object().product
+        response = super().destroy(request, *args, **kwargs)
+        admin_services.sync_product_price(product)
+        return response
 
 
 @extend_schema(tags=["Admin"])
