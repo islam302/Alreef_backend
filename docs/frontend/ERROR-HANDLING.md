@@ -152,6 +152,8 @@ Grouped by what the frontend should *do*, not by domain.
 | `SHIPPING_UNAVAILABLE` | 409 | No rate for that governorate. Ask them to pick another, or offer pickup. |
 | `SHIPPING_METHOD_NOT_FOUND` | 404 | Refetch quotes — the method was deactivated. |
 | `ORDER_CANNOT_CANCEL` | 409 | Too late to cancel. Refetch the order; hide the cancel button. |
+| `ORDER_PAYMENT_IN_PROGRESS` | 409 | A card/wallet payment is still unconfirmed. Ask the customer to wait; never suggest paying again. |
+| `ORDER_ALREADY_PAID` | 409 | Paid online; cancelling means a refund. Point to contact/support. |
 | `ORDER_INVALID_TRANSITION` | 409 | Same — the order moved on. Refetch. |
 | `LOYALTY_INSUFFICIENT_POINTS` | 409 | Show the real balance from `GET /loyalty/`. |
 | `GIFT_CARD_INSUFFICIENT_BALANCE` | 409 | Show the remaining balance. |

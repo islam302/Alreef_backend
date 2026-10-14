@@ -63,6 +63,9 @@ class ErrorCodes:
     # Orders
     ORDER_NOT_FOUND = "ORDER_NOT_FOUND"
     ORDER_CANNOT_CANCEL = "ORDER_CANNOT_CANCEL"
+    # A customer cancelling while their online payment is unresolved, or paid.
+    ORDER_PAYMENT_IN_PROGRESS = "ORDER_PAYMENT_IN_PROGRESS"
+    ORDER_ALREADY_PAID = "ORDER_ALREADY_PAID"
     ORDER_INVALID_TRANSITION = "ORDER_INVALID_TRANSITION"
 
     # Payments
@@ -138,6 +141,8 @@ ERROR_STATUS_MAP = {
     ErrorCodes.COUPON_NOT_APPLICABLE: 400,
     ErrorCodes.ORDER_NOT_FOUND: 404,
     ErrorCodes.ORDER_CANNOT_CANCEL: 409,
+    ErrorCodes.ORDER_PAYMENT_IN_PROGRESS: 409,
+    ErrorCodes.ORDER_ALREADY_PAID: 409,
     ErrorCodes.ORDER_INVALID_TRANSITION: 409,
     ErrorCodes.PAYMENT_FAILED: 402,
     ErrorCodes.PAYMENT_EXPIRED: 410,

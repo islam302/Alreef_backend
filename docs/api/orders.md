@@ -84,7 +84,7 @@ Only allowed while the order's current status has `cancelled` in its transition 
 
 Success `200`: full `OrderDetailSerializer`, message `"Order cancelled."`
 
-Errors: `ORDER_NOT_FOUND` (404), `ORDER_CANNOT_CANCEL` (409, order already shipped/delivered/cancelled/etc. — `Order.can_cancel()` returned false).
+Errors: `ORDER_NOT_FOUND` (404), `ORDER_CANNOT_CANCEL` (409, order already shipped/delivered/cancelled/etc. — `Order.can_cancel()` returned false), `ORDER_PAYMENT_IN_PROGRESS` (409, a card/wallet payment is still unconfirmed at the gateway — cancelling now and paying again could charge twice), `ORDER_ALREADY_PAID` (409, paid online — cancelling needs a refund, done by staff).
 
 ## Returns
 

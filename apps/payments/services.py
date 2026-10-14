@@ -1180,12 +1180,12 @@ def assert_customer_may_cancel(order) -> None:
     payments = list(order.payments.all())
     if any(p.status in payment_state.IN_FLIGHT and _is_gateway(p.provider) for p in payments):
         raise ApplicationError(
-            ErrorCodes.ORDER_CANNOT_CANCEL,
+            ErrorCodes.ORDER_PAYMENT_IN_PROGRESS,
             "Your payment is still being confirmed. Please wait a few minutes before cancelling.",
         )
     if any(p.status in payment_state.SETTLED and _is_gateway(p.provider) for p in payments):
         raise ApplicationError(
-            ErrorCodes.ORDER_CANNOT_CANCEL,
+            ErrorCodes.ORDER_ALREADY_PAID,
             "This order is already paid. Contact us to cancel it and get your money back.",
         )
 

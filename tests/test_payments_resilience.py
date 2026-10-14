@@ -372,6 +372,7 @@ def test_customer_cannot_cancel_while_payment_is_in_flight(
     response = _cancel(authenticated_client, payment.order)
 
     assert response.status_code == 409
+    assert response.json()["errors"]["code"] == "ORDER_PAYMENT_IN_PROGRESS"
     payment.order.refresh_from_db()
     assert payment.order.status == OrderStatus.PENDING
 
@@ -385,6 +386,7 @@ def test_cancel_asks_the_gateway_first_and_finds_the_payment(
     response = _cancel(authenticated_client, payment.order)
 
     assert response.status_code == 409
+    assert response.json()["errors"]["code"] == "ORDER_ALREADY_PAID"
     payment.refresh_from_db()
     payment.order.refresh_from_db()
     assert payment.status == PaymentStatus.CAPTURED
