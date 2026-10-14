@@ -1,7 +1,8 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Your order has shipped — #{{ order_number }}</h2>
-<p>Carrier: {{ carrier }}</p>
-<p>Tracking number: {{ tracking_number }}</p>
-<p><a href="{{ tracking_url }}">Track shipment</a></p>
+<h2 style="margin:0 0 12px;color:#174b3a;">طلبك خرج للشحن</h2>
+<p>الطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong> في الطريق ليك.</p>
+{% if carrier %}<p style="margin:0;">شركة الشحن: {{ carrier }}</p>{% endif %}
+{% if tracking_number %}<p style="margin:0;">رقم الشحنة: <span dir="ltr" style="unicode-bidi:embed;">{{ tracking_number }}</span></p>{% endif %}
+{% if tracking_url %}<p style="margin:24px 0;"><a href="{{ tracking_url }}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">تتبع الشحنة</a></p>{% else %}<p style="margin:24px 0;"><a href="{% if order_url %}{{ order_url }}{% else %}{{ frontend_url }}/account/orders/{{ order_number }}{% endif %}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">تابع طلبك</a></p>{% endif %}
 {% endblock %}

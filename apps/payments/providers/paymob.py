@@ -256,8 +256,10 @@ class PaymobPaymentProvider(PaymentProvider):
             "building": address.get("building") or "NA",
             "floor": address.get("floor") or "NA",
             "apartment": address.get("apartment") or "NA",
-            "city": address.get("city") or address.get("governorate") or "NA",
-            "state": address.get("governorate") or "NA",
+            # The English names where the order has them: card networks and
+            # anti-fraud checks expect Latin text in billing data.
+            "city": address.get("city_en") or address.get("city") or address.get("governorate_en") or address.get("governorate") or "NA",
+            "state": address.get("governorate_en") or address.get("governorate") or "NA",
             "country": "EG",
             "postal_code": address.get("postal_code") or "NA",
         }

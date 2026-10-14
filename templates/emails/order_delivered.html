@@ -1,6 +1,6 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Delivered — #{{ order_number }}</h2>
-<p>Your order was delivered. We hope you enjoy it! Leave a review to help other customers.</p>
-<p><a href="{{ frontend_url }}/orders/{{ order_number }}/review">Write a review</a></p>
+<h2 style="margin:0 0 12px;color:#174b3a;">طلبك وصل</h2>
+<p>الطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong> اتسلّم. نتمنى المنتجات تعجبك، ولو حبيت تكتب رأيك هيساعد غيرك يختار.</p>
+<p style="margin:24px 0;"><a href="{% if order_url %}{{ order_url }}{% else %}{{ frontend_url }}/account/orders/{{ order_number }}{% endif %}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">شوف طلبك</a></p>
 {% endblock %}

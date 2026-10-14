@@ -19,11 +19,27 @@ def get_valid_coupon(code: str) -> Coupon:
     return coupon
 
 
-def _check_per_user_limit(coupon: Coupon, user):
-    if user and coupon.per_user_limit is not None:
+def _check_per_user_limit(coupon: Coupon, user, phone: str = ""):
+    """
+    The per-customer cap. A customer is their account when they have one, and
+    their phone number when they check out as a guest.
+
+    Keying a guest by phone, and counting every order placed with that phone
+    (with or without an account), is what stops "one per customer" from being
+    "one per customer, plus as many more as you like by not signing in". The
+    phone is the order's E.164 snapshot, so formatting cannot split one person
+    into several.
+    """
+    if coupon.per_user_limit is None:
+        return
+    if user:
         used = CouponUsage.objects.filter(coupon=coupon, user=user).count()
-        if used >= coupon.per_user_limit:
-            raise ApplicationError(ErrorCodes.COUPON_USAGE_LIMIT_REACHED, "You have already used this coupon the maximum number of times.")
+    elif phone:
+        used = CouponUsage.objects.filter(coupon=coupon, order__customer_phone=phone).count()
+    else:
+        return
+    if used >= coupon.per_user_limit:
+        raise ApplicationError(ErrorCodes.COUPON_USAGE_LIMIT_REACHED, "You have already used this coupon the maximum number of times.")
 
 
 def _applicable_items(coupon: Coupon, items):
@@ -41,9 +57,9 @@ def _applicable_items(coupon: Coupon, items):
     return applicable
 
 
-def validate_coupon_for_cart(*, code: str, cart, user=None) -> Coupon:
+def validate_coupon_for_cart(*, code: str, cart, user=None, phone: str = "") -> Coupon:
     coupon = get_valid_coupon(code)
-    _check_per_user_limit(coupon, user)
+    _check_per_user_limit(coupon, user, phone)
 
     from apps.carts.services import get_cart_subtotal
 
@@ -102,3 +118,19 @@ def record_usage(*, coupon: Coupon, user, order, discount_amount: Money):
         defaults={"user": user, "discount_amount": discount_amount},
     )
     return usage
+
+
+def release_usage(*, order) -> int:
+    """
+    Give back the coupon use an order had reserved. Returns how many rows went.
+
+    A use is reserved when the order is created (see
+    checkout.services.create_order_from_cart), so an order that is then
+    cancelled — by the customer, by staff, or by the sweep that drops unpaid
+    card orders — must hand it back, or a single-use code would be spent on an
+    order that never happened. The row is deleted rather than flagged because
+    the limits are counted from these rows, and every query that counts them
+    would otherwise have to remember to skip the released ones.
+    """
+    deleted, _ = CouponUsage.objects.filter(order=order).delete()
+    return deleted

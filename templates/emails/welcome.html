@@ -1,7 +1,7 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Welcome to {{ site_name }}!</h2>
-<p>Hi {{ first_name|default:"there" }},</p>
-<p>Thanks for creating an account. Start exploring our honey, dates, nuts and natural food selection.</p>
-<p><a href="{{ frontend_url }}">Browse products</a></p>
+<h2 style="margin:0 0 12px;color:#174b3a;">أهلاً بيك في الريف</h2>
+<p>أهلاً {{ first_name|default:"بيك" }}،</p>
+<p>شكراً إنك عملت حساب عندنا. اكتشف العسل والتمور والمكسرات وباقي منتجاتنا الطبيعية.</p>
+<p style="margin:24px 0;"><a href="{{ frontend_url }}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">تسوّق دلوقتي</a></p>
 {% endblock %}

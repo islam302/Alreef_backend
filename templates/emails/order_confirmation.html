@@ -1,7 +1,9 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Order confirmed — #{{ order_number }}</h2>
-<p>Thank you for your order! We're preparing it now.</p>
-<p><strong>Total:</strong> {{ total }} {{ currency }}</p>
-<p><a href="{{ frontend_url }}/orders/{{ order_number }}">View order</a></p>
+<h2 style="margin:0 0 12px;color:#174b3a;">طلبك اتأكد</h2>
+<p>{% if customer_name %}أهلاً {{ customer_name }}، {% endif %}شكراً إنك طلبت من الريف. بنجهّز طلبك دلوقتي، وهنكلّمك على رقمك لتأكيد ميعاد التوصيل.</p>
+<p style="margin:0;">رقم الطلب: <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong></p>
+<p style="margin:0;">الإجمالي: <strong>{{ total }} {{ currency }}</strong></p>
+{% if is_guest %}<p style="font-size:14px;color:#6b7a73;">تقدر تتابع طلبك في أي وقت برقم الطلب ورقم موبايلك.</p>{% endif %}
+<p style="margin:24px 0;"><a href="{% if order_url %}{{ order_url }}{% else %}{{ frontend_url }}/account/orders/{{ order_number }}{% endif %}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">تابع طلبك</a></p>
 {% endblock %}

@@ -332,9 +332,11 @@ def mark_payment_failed(payment: Payment, *, error_message: str = ""):
         raw_response={"error": (error_message or "")[:500]},
     )
 
-    from apps.notifications.tasks import send_email_task
+    # After commit: a failure that rolls back must not email, and a broker
+    # outage must not undo the recorded failure (notifications.queue_email).
+    from apps.notifications.services import queue_email
 
-    send_email_task.delay(
+    queue_email(
         to=payment.order.customer_email,
         subject="Payment failed",
         template_name="payment_failed",
@@ -1099,9 +1101,9 @@ def _create_refund(*, payment, amount, reason, destination, idempotency_key, act
     )
 
     if result.success:
-        from apps.notifications.tasks import send_email_task
+        from apps.notifications.services import queue_email
 
-        send_email_task.delay(
+        queue_email(
             to=payment.order.customer_email,
             subject="Refund processed",
             template_name="refund",

@@ -40,6 +40,10 @@ router.register("store-reviews", views.AdminStoreReviewViewSet, basename="admin-
 router.register("payments", views.AdminPaymentViewSet, basename="admin-payment")
 router.register("audit-logs", views.AdminAuditLogViewSet, basename="admin-audit-log")
 router.register("staff", views.AdminStaffViewSet, basename="admin-staff")
+router.register("shipping/governorates", views.AdminShippingGovernorateViewSet, basename="admin-shipping-governorate")
+router.register("shipping/zones", views.AdminShippingZoneViewSet, basename="admin-shipping-zone")
+router.register("shipping/rates", views.AdminShippingRateViewSet, basename="admin-shipping-rate")
+router.register("shipping/methods", views.AdminShippingMethodViewSet, basename="admin-shipping-method")
 
 urlpatterns = [
     path("me/", views.AdminMeView.as_view(), name="me"),

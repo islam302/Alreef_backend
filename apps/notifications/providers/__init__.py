@@ -3,7 +3,26 @@ from django.conf import settings
 from .sms_base import ConsoleSMSProvider, SMSProvider
 from .whatsapp_base import ConsoleWhatsAppProvider, WhatsAppProvider
 
-__all__ = ["SMSProvider", "WhatsAppProvider", "get_sms_provider", "get_whatsapp_provider"]
+__all__ = [
+    "SMSProvider", "WhatsAppProvider", "get_sms_provider", "get_whatsapp_provider", "sms_reaches_customers",
+]
+
+
+def sms_reaches_customers() -> bool:
+    """
+    Whether an SMS sent now would arrive on somebody's phone.
+
+    The console provider only writes to the log. That is the point of it on a
+    developer's machine, and a lie anywhere else: production ships with it
+    (no real vendor is wired in yet), so "OTP sent" was returned for a message
+    that went nowhere — and, before the masking above, landed the code in the
+    container log instead. Production sets SMS_CONSOLE_IS_DELIVERY=False, so
+    features that depend on a text actually arriving can say they are not
+    available instead of pretending.
+    """
+    if getattr(settings, "SMS_PROVIDER", "console") != "console":
+        return True
+    return getattr(settings, "SMS_CONSOLE_IS_DELIVERY", True)
 
 
 def get_sms_provider() -> SMSProvider:

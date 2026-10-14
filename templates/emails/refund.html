@@ -1,5 +1,6 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Refund processed — #{{ order_number }}</h2>
-<p>We've refunded {{ amount }} {{ currency }} to your original payment method / store credit.</p>
+<h2 style="margin:0 0 12px;color:#174b3a;">رجّعنالك فلوسك</h2>
+<p>رجّعنا <strong>{{ amount }} {{ currency }}</strong> من قيمة الطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong> على وسيلة الدفع الأصلية أو رصيدك عندنا.</p>
+<p style="font-size:14px;color:#6b7a73;">ممكن ياخد كام يوم لحد ما يظهر عندك، حسب البنك أو المحفظة.</p>
 {% endblock %}

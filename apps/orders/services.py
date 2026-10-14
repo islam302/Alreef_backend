@@ -134,6 +134,12 @@ def cancel_order(order: Order, *, reason: str, cancelled_by=None) -> Order:
         release_reservation(reservation)
     _restock_consumed(order)
 
+    # The coupon use was reserved when the order was placed; a cancelled order
+    # never happened, so the use goes back to the code's limits.
+    from apps.coupons.services import release_usage
+
+    release_usage(order=order)
+
     order = transition_status(order, OrderStatus.CANCELLED, changed_by=cancelled_by, note=reason)
     order.cancel_reason = reason
     order.save(update_fields=["cancel_reason"])
@@ -216,20 +222,59 @@ def _collect_cash_on_delivery(order: Order, *, collected_by=None):
         )
 
 
-def _dispatch_status_notification(order: Order, new_status: str):
-    from apps.notifications.tasks import send_email_task
+def order_email_context(order: Order) -> dict:
+    """What every order email may use. Existing keys keep their names."""
+    from apps.orders.guest import order_url_for
 
-    templates = {
-        OrderStatus.SHIPPED: ("order_shipped", "Your order has shipped", "order_shipped"),
-        OrderStatus.DELIVERED: ("order_delivered", "Your order was delivered", "order_delivered"),
+    return {
+        "order_number": order.order_number,
+        "customer_name": order.customer_name,
+        "total": str(order.grand_total.amount),
+        "currency": order.currency,
+        "order_url": order_url_for(order),
+        "is_guest": order.user_id is None,
     }
-    entry = templates.get(new_status)
+
+
+# Status -> (notification event, template). The subjects live with the templates
+# in apps.notifications.services.EMAIL_SUBJECTS.
+STATUS_EMAILS = {
+    # Here rather than in checkout's confirm_order, because this is the one
+    # place every route to CONFIRMED passes through — checkout, a gateway
+    # callback, staff confirming a transfer from the dashboard — and it fires
+    # only on the transition itself. confirm_order runs again when cash is
+    # collected or a callback is re-delivered, and each of those used to send
+    # the customer another "order confirmed".
+    OrderStatus.CONFIRMED: ("order_created", "order_confirmation"),
+    OrderStatus.SHIPPED: ("order_shipped", "order_shipped"),
+    OrderStatus.DELIVERED: ("order_delivered", "order_delivered"),
+    # Staff cancelling an order used to leave the customer to find out when the
+    # courier never came.
+    OrderStatus.CANCELLED: ("order_cancelled", "order_cancelled"),
+}
+
+
+def _dispatch_status_notification(order: Order, new_status: str):
+    from apps.notifications.services import queue_email
+
+    entry = STATUS_EMAILS.get(new_status)
     if not entry:
         return
-    event, subject, template_name = entry
-    send_email_task.delay(
-        to=order.customer_email, subject=subject, template_name=template_name,
-        context={"order_number": order.order_number}, event=event, user_id=order.user_id,
+    event, template_name = entry
+    context = order_email_context(order)
+    if new_status == OrderStatus.CANCELLED:
+        # No reason in the email, deliberately. The reason is typed by staff
+        # into a dashboard field that reads as an internal note ("duplicate",
+        # "fake number"), and nothing there tells them a customer will read it.
+        # What the customer does need to know is whether money is involved.
+        from apps.payments.models import PaymentStatus
+
+        context["was_paid"] = order.payments.filter(
+            status__in=[PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED]
+        ).exists()
+    queue_email(
+        to=order.customer_email, subject=template_name, template_name=template_name,
+        context=context, event=event, user_id=order.user_id,
     )
 
 

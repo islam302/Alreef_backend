@@ -89,6 +89,13 @@ if EMAIL_BACKEND.endswith("smtp.EmailBackend") and not EMAIL_HOST:
         "delivery time rather than at boot. Set EMAIL_HOST (and the credentials it needs)."
     )
 
+# SMS. Only the console provider ships, and in production it writes to the log
+# rather than to anybody's phone. Declaring that here is what makes the phone
+# OTP endpoint answer "not available" instead of "sent" (see
+# apps.notifications.providers.sms_reaches_customers). A real vendor, once wired
+# in, is a different SMS_PROVIDER and is unaffected by this flag.
+SMS_CONSOLE_IS_DELIVERY = False
+
 SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=True, cast=bool)
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True

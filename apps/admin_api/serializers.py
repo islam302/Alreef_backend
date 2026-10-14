@@ -17,6 +17,15 @@ from apps.inventory.models import Batch, InventoryItem, InventoryMovement
 from apps.orders.models import Order, OrderItem, OrderStatusHistory, ReturnRequest
 from apps.payments.models import Payment, Refund
 from apps.reviews.models import Review, StoreReview
+from apps.shipping.models import (
+    Governorate,
+    Shipment,
+    ShipmentEvent,
+    ShipmentStatus,
+    ShippingMethod,
+    ShippingRate,
+    ShippingZone,
+)
 from apps.users.models import User
 
 
@@ -196,6 +205,7 @@ class AdminOrderDetailSerializer(serializers.ModelSerializer):
     status_history = AdminOrderStatusHistorySerializer(many=True, read_only=True)
     allowed_transitions = serializers.SerializerMethodField()
     payments = AdminPaymentSerializer(many=True, read_only=True)
+    shipments = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -207,8 +217,13 @@ class AdminOrderDetailSerializer(serializers.ModelSerializer):
             "gift_card_amount_used", "store_credit_amount_used", "tax_total", "shipping_total",
             "cod_fee", "grand_total", "notes", "cancel_reason",
             "confirmed_at", "shipped_at", "delivered_at", "cancelled_at", "created_at", "updated_at",
-            "items", "status_history", "payments",
+            "items", "status_history", "payments", "shipments",
         ]
+
+    def get_shipments(self, obj) -> list:
+        # A method field because the shipping serializers are declared further
+        # down this module.
+        return AdminShipmentSerializer(obj.shipments.all(), many=True).data
 
     def get_allowed_transitions(self, obj) -> list:
         from apps.orders.models import ORDER_STATUS_TRANSITIONS
@@ -619,3 +634,164 @@ class AdminStaffSerializer(serializers.ModelSerializer):
             "is_active", "is_staff", "is_superuser", "last_login", "date_joined",
         ]
         read_only_fields = ["is_superuser", "last_login", "date_joined"]
+
+
+# --------------------------------------------------------------------------
+# Shipping
+# --------------------------------------------------------------------------
+# Every money field on a rate is a fee or a bound on one; none can be negative.
+_NON_NEGATIVE = {"min_value": 0}
+
+
+class AdminShippingMethodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShippingMethod
+        fields = [
+            "id", "name", "method_type", "description", "carrier_code",
+            "min_delivery_days", "max_delivery_days", "is_active", "sort_order",
+        ]
+
+    def validate(self, attrs):
+        low = attrs.get("min_delivery_days", getattr(self.instance, "min_delivery_days", None))
+        high = attrs.get("max_delivery_days", getattr(self.instance, "max_delivery_days", None))
+        if low is not None and high is not None and high < low:
+            raise serializers.ValidationError({"max_delivery_days": "Must not be less than the minimum."})
+        return attrs
+
+
+class AdminShippingRateSerializer(serializers.ModelSerializer):
+    method_name = serializers.CharField(source="method.name", read_only=True)
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+
+    class Meta:
+        model = ShippingRate
+        fields = [
+            "id", "zone", "zone_name", "method", "method_name", "calculation_type",
+            "base_price", "price_per_kg", "min_weight_kg", "max_weight_kg",
+            "min_order_amount", "free_shipping_threshold", "is_active",
+        ]
+        extra_kwargs = {
+            "base_price": _NON_NEGATIVE,
+            "price_per_kg": _NON_NEGATIVE,
+            "min_order_amount": _NON_NEGATIVE,
+            "free_shipping_threshold": _NON_NEGATIVE,
+            "min_weight_kg": _NON_NEGATIVE,
+            "max_weight_kg": _NON_NEGATIVE,
+        }
+
+    def validate(self, attrs):
+        low = attrs.get("min_weight_kg", getattr(self.instance, "min_weight_kg", None))
+        high = attrs.get("max_weight_kg", getattr(self.instance, "max_weight_kg", None))
+        if low is not None and high is not None and high < low:
+            raise serializers.ValidationError({"max_weight_kg": "Must not be less than the minimum weight."})
+        return attrs
+
+
+class AdminShippingZoneSerializer(serializers.ModelSerializer):
+    rates = AdminShippingRateSerializer(many=True, read_only=True)
+    governorates = serializers.PrimaryKeyRelatedField(many=True, queryset=Governorate.objects.all(), required=False)
+
+    class Meta:
+        model = ShippingZone
+        fields = ["id", "name", "is_active", "governorates", "rates", "created_at"]
+
+    def validate_governorates(self, value):
+        # Quotes come from every zone a governorate is in, so a governorate in
+        # two zones would be offered the same method twice at two prices.
+        taken = Governorate.objects.filter(pk__in=[g.pk for g in value], zones__isnull=False)
+        if self.instance is not None:
+            taken = taken.exclude(zones=self.instance)
+        names = sorted({g.name_en for g in taken})
+        if names:
+            raise serializers.ValidationError(f"Already in another zone: {', '.join(names)}.")
+        return value
+
+
+class AdminGovernorateShippingSerializer(serializers.ModelSerializer):
+    """One row per governorate with what each method costs to deliver there.
+    `zone.zone_size` tells the dashboard whether a fee change is shared with
+    other governorates."""
+
+    zone = serializers.SerializerMethodField()
+    rates = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Governorate
+        fields = ["id", "code", "name_en", "name_ar", "is_active", "sort_order", "zone", "rates"]
+        read_only_fields = ["code", "name_en", "name_ar", "sort_order"]
+
+    def get_zone(self, obj) -> dict | None:
+        zones = list(obj.zones.all())
+        if not zones:
+            return None
+        zone = zones[0]
+        return {
+            "id": zone.id, "name": zone.name, "is_active": zone.is_active,
+            "zone_size": len(zone.governorates.all()), "zone_count": len(zones),
+        }
+
+    def get_rates(self, obj) -> list:
+        rates = [rate for zone in obj.zones.all() for rate in zone.rates.all()]
+        return AdminShippingRateSerializer(rates, many=True).data
+
+
+class GovernorateRateSerializer(serializers.Serializer):
+    method = serializers.PrimaryKeyRelatedField(queryset=ShippingMethod.objects.all())
+    base_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    free_shipping_threshold = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=0, required=False, allow_null=True, default=None
+    )
+    is_active = serializers.BooleanField(required=False, default=True)
+    apply_to_zone = serializers.BooleanField(required=False, default=False)
+
+
+class AdminShipmentEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShipmentEvent
+        fields = ["id", "status", "description", "location", "occurred_at"]
+
+
+class AdminShipmentSerializer(serializers.ModelSerializer):
+    shipping_method_name = serializers.CharField(source="shipping_method.name", read_only=True)
+    events = AdminShipmentEventSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Shipment
+        fields = [
+            "id", "shipping_method", "shipping_method_name", "carrier_code", "tracking_number", "tracking_url",
+            "status", "estimated_delivery", "shipped_at", "delivered_at", "events", "created_at", "updated_at",
+        ]
+
+
+#: Tracking numbers end up in a URL path (/shipping/track/<number>/), so a
+#: slash or a space would make the customer's tracking link unreachable.
+_TRACKING_NUMBER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+class ShipmentWriteSerializer(serializers.Serializer):
+    carrier_code = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    tracking_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    tracking_url = serializers.URLField(max_length=200, required=False, allow_blank=True)
+    status = serializers.ChoiceField(choices=ShipmentStatus.choices, required=False)
+    estimated_delivery = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+    def validate_tracking_number(self, value):
+        if not value:
+            return value
+        if not _TRACKING_NUMBER.match(value):
+            raise serializers.ValidationError("Use letters, digits, dots, dashes or underscores only.")
+        # The customer's tracking route looks a shipment up by this number
+        # alone, so two orders sharing one would make it ambiguous.
+        others = Shipment.objects.filter(tracking_number=value)
+        if self.context.get("order") is not None:
+            others = others.exclude(order=self.context["order"])
+        if others.exists():
+            raise serializers.ValidationError("Another order already uses this tracking number.")
+        return value
+
+    def validate_tracking_url(self, value):
+        # Rendered to the customer as a link, so only ever a web address.
+        if value and not value.lower().startswith(("https://", "http://")):
+            raise serializers.ValidationError("Must start with https:// or http://.")
+        return value

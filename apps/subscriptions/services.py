@@ -74,7 +74,8 @@ def generate_order_for_subscription(subscription: Subscription) -> SubscriptionS
             customer_name=subscription.address.full_name, customer_email=subscription.user.email,
             customer_phone=str(subscription.address.phone),
             shipping_address_snapshot={
-                "governorate": subscription.address.governorate.name_en,
+                "governorate": subscription.address.governorate.name_ar or subscription.address.governorate.name_en,
+                "governorate_en": subscription.address.governorate.name_en,
                 "street": subscription.address.street, "building": subscription.address.building,
             },
             shipping_method_name=subscription.shipping_method.name, payment_method=subscription.payment_method,

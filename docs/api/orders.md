@@ -137,3 +137,28 @@ Errors: `ORDER_NOT_FOUND` (404), `ORDER_INVALID_TRANSITION` (409), `VALIDATION_E
 Lists all of the caller's return requests across all orders (not paginated — returns a plain array), most useful for an "my returns" account page. Same `ReturnRequestSerializer` shape as above, `items[]` included via prefetch.
 
 Note: staff-side approval/rejection (`decide_return_request`) and the receive-item-and-refund step (`complete_return_and_refund`, which calls into `apps.payments.services.create_refund`) exist in `apps/orders/services.py` but are **not exposed through this customer-facing router** — they're invoked from the admin/staff surface, not documented here.
+
+
+## POST /api/v1/orders/lookup/ — guest orders
+
+For customers who ordered without an account. Public, throttled (`order_lookup`, 10/min per IP), and a POST so neither key lands in an access log or a Referer header. Body, either:
+
+```json
+{"token": "<access_token from checkout>"}
+```
+
+or
+
+```json
+{"order_number": "ORD-20261015-00042", "phone": "01001234567"}
+```
+
+Returns a deliberately narrow view: status, items, totals, status history (statuses and times only), destination as governorate + city, and the latest payment's method/status/transfer instructions. No street, email, phone or staff notes.
+
+Every miss — unknown number, wrong phone, bad or expired token, an order that belongs to an account — is the same 404 `ORDER_NOT_FOUND`, so the endpoint cannot tell anybody which order numbers exist. Ten wrong phones against one order number lock that number's phone lookup for an hour (429 `THROTTLED`), independent of IP; the token keeps working. Orders placed by signed-in customers are never returned here — their owner signs in.
+
+The token is `django.core.signing` over the order id and number (salted, signed with `SECRET_KEY`, valid 180 days). With a token, an open online payment is reconciled with the gateway before answering; the phone path never calls the gateway.
+
+## Order emails
+
+Sent on status transitions, once each, in Arabic (subjects in `apps.notifications.services.EMAIL_SUBJECTS`): confirmed (whichever route confirms the order — checkout, gateway, or staff), shipped, delivered, and cancelled (the staff reason is not included; the email says whether a refund will be arranged when the order was paid). Emails are queued only after the transaction commits, and a broker outage is logged rather than failing the request. Links point at `/account/orders/{number}` for account holders and `/track?order={number}` for guests.

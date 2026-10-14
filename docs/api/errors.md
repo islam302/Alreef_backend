@@ -74,6 +74,7 @@ HTTP status: `400`.
 | `AUTH_PHONE_ALREADY_EXISTS` | 409 | Registration phone already taken |
 | `AUTH_OTP_INVALID` | 400 | Wrong phone verification code |
 | `AUTH_OTP_EXPIRED` | 400 | Phone verification code expired |
+| `AUTH_OTP_UNAVAILABLE` | 503 | Phone verification cannot be offered: no SMS provider that actually delivers is configured |
 | `AUTH_ACCOUNT_LOCKED` | 429 | 10 failed login attempts on this email within 15 minutes — locked out for 15 minutes regardless of caller IP |
 | `PRODUCT_NOT_FOUND` | 404 | Product slug not found/not published (used by related-products lookup) |
 | `PRODUCT_NOT_PUBLISHED` | 404 | Reserved for explicit unpublished-product checks |

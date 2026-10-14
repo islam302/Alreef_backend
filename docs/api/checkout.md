@@ -2,7 +2,7 @@
 
 Base path: `/api/v1/checkout/`
 
-Source: `apps/checkout/{urls,views,serializers,services}.py`. Both endpoints require `IsAuthenticated` — checkout is not available to guests; the cart must be merged into a logged-in user's cart first (see `docs/api/cart.md`).
+Source: `apps/checkout/{urls,views,serializers,services}.py`. Both endpoints serve signed-in customers (body below) **and guests** (see [Guest checkout](#guest-checkout)). A request carrying a valid Bearer token always takes the signed-in path.
 
 ## Why totals are always server-computed
 
@@ -123,3 +123,37 @@ Success `201` (`CheckoutResultSerializer`):
 For a non-COD `payment_method` whose provider is actually implemented, `payment.status` would be `pending`/`authorized` and `redirect_url`/`iframe_url` would carry the gateway's hosted checkout URL for the frontend to redirect the customer to; the client then polls `GET /api/v1/payments/{id}/status/` (see `docs/api/payments.md`). **As of this writing only `cod` completes end-to-end** — see `docs/api/payments.md` for the status of the other gateways.
 
 Errors (in addition to the summary endpoint's list): `IDEMPOTENCY_KEY_REQUIRED` (400, header missing), `IDEMPOTENCY_KEY_CONFLICT` (409), `INSUFFICIENT_STOCK` / `NO_VALID_BATCH` (409, stock reservation failed), `PAYMENT_FAILED` (402, provider rejected payment creation), `PAYMENT_PROVIDER_UNAVAILABLE` (503, unimplemented/disabled provider — the whole order creation is rolled back).
+
+
+## Guest checkout
+
+Customers can order without an account. A request with no Bearer token is a guest request: the cart is the one on the Django session cookie (`credentials: 'include'`), and the body carries contact details and an inline address instead of `address_id`. Same cart lock, same server-computed totals, same coupon rules, same `checkout` throttle, same mandatory `Idempotency-Key`. Switch off with `GUEST_CHECKOUT_ENABLED = False` (guests then get 401, as before).
+
+`POST /api/v1/checkout/` — `GuestCheckoutInputSerializer`:
+
+```json
+{
+  "contact": {"full_name": "Mona Ali", "phone": "01001234567", "email": "mona@example.com"},
+  "address": {"governorate": 1, "city": 4, "district": "", "street": "12 Tahrir St", "building": "3",
+              "floor": "", "apartment": "", "landmark": "", "postal_code": "", "notes": ""},
+  "shipping_method_id": 2,
+  "payment_method": "cod",
+  "coupon_code": "",
+  "notes": ""
+}
+```
+
+* `contact.phone` is required (Egyptian numbers in any common form; stored as E.164). `contact.email` is optional — without it the guest gets no emails.
+* `address.governorate` / `address.city` are ids (active only); the city must be in the governorate. The address is **not** saved to any address book.
+* Sending `address_id` as a guest is refused with 404 `ADDRESS_NOT_FOUND` — guests can never name a saved address.
+* A coupon's per-customer limit is counted per **phone** for guests (every order placed with that phone).
+
+The 201 response is the usual `{order, payment}` plus **`access_token`**: a signed token for this one order, shown once. Keep it (the storefront keeps it in the browser) — it is how the guest gets back to the order: `POST /api/v1/orders/lookup/` (see `docs/api/orders.md`).
+
+`POST /api/v1/checkout/summary/` for a guest takes `governorate` (id), `shipping_method_id`, `payment_method`, `coupon_code`, and optionally `phone` (so the coupon's per-customer limit is checked before ordering).
+
+Online payment: the gateway return page (`/order/payment-return`) is account-only today, so the storefront offers guests only the methods that do not redirect (COD, InstaPay transfer). The API itself does not restrict methods for guests, and a guest can follow a payment through the lookup endpoint with their token, which reconciles an open payment with the gateway the same way `GET /payments/{id}/status/` does.
+
+## Coupon uses are reserved at checkout
+
+The coupon's use (`CouponUsage`) is written when the order is created, inside the same transaction that locks the coupon row — not when it is confirmed. A pending card or InstaPay order therefore counts against `usage_limit` and `per_user_limit` while the customer is paying. Cancelling the order (customer, staff, or the unpaid-order sweep) releases the use.

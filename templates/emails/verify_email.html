@@ -1,7 +1,7 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Verify your email</h2>
-<p>Please confirm your email address to activate your account.</p>
-<p><a href="{{ verify_url }}">Verify email</a></p>
-<p>This link expires in {{ expires_hours|default:"24" }} hours.</p>
+<h2 style="margin:0 0 12px;color:#174b3a;">أكّد إيميلك</h2>
+<p>{% if first_name %}أهلاً {{ first_name }}، {% endif %}دوس على الزرار عشان تأكد إيميلك وتفعّل حسابك.</p>
+<p style="margin:24px 0;"><a href="{{ verify_url }}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">أكّد الإيميل</a></p>
+<p style="font-size:14px;color:#6b7a73;">الرابط صالح لمدة {{ expires_hours|default:"24" }} ساعة.</p>
 {% endblock %}

@@ -15,6 +15,7 @@ class NotificationEvent(models.TextChoices):
     ORDER_SHIPPED = "order_shipped", "Order shipped"
     OUT_FOR_DELIVERY = "out_for_delivery", "Out for delivery"
     ORDER_DELIVERED = "order_delivered", "Order delivered"
+    ORDER_CANCELLED = "order_cancelled", "Order cancelled"
     REFUND_PROCESSED = "refund_processed", "Refund processed"
     LOW_STOCK = "low_stock", "Low stock"
     ABANDONED_CART = "abandoned_cart", "Abandoned cart"

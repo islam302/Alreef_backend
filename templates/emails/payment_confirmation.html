@@ -1,5 +1,5 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Payment received — #{{ order_number }}</h2>
-<p>We've received your payment of {{ amount }} {{ currency }}.</p>
+<h2 style="margin:0 0 12px;color:#174b3a;">وصلنا الدفع</h2>
+<p>استلمنا <strong>{{ amount }} {{ currency }}</strong> قيمة الطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong>. شكراً ليك.</p>
 {% endblock %}

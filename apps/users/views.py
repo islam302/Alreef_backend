@@ -260,8 +260,19 @@ class PhoneVerifyRequestView(APIView):
                 ErrorCodes.VALIDATION_ERROR,
                 "That is not the phone number on your account. Update your profile first.",
             )
+        # Checked before a code is issued: with no SMS vendor configured the
+        # console provider only writes to the log, so "OTP sent" would be a
+        # promise nobody keeps and the customer would wait for a text that is
+        # never coming.
+        from apps.notifications.providers import sms_reaches_customers
+
+        if not sms_reaches_customers():
+            raise ApplicationError(
+                ErrorCodes.AUTH_OTP_UNAVAILABLE,
+                "Phone verification is not available at the moment.",
+            )
         code = services.issue_phone_otp(request.user)
-        send_sms_task.delay(to=phone, message=f"Your verification code is {code}", event="phone_verification", user_id=request.user.id)
+        send_sms_task.delay(to=phone, message=f"كود التأكيد بتاعك: {code}", event="phone_verification", user_id=request.user.id)
         return success_response(message="OTP sent.")
 
 

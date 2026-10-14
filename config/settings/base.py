@@ -229,6 +229,9 @@ REST_FRAMEWORK = {
         # never be reachable at the generic 300/min authenticated rate.
         "gift_card": "10/min",
         "coupon": "20/min",
+        # Guest order lookup: anonymous, and the phone is the secret being
+        # guessed. A customer checks their order a few times, not dozens.
+        "order_lookup": "10/min",
         # Anonymous, unauthenticated writes to the events table.
         "analytics": "60/min",
     },

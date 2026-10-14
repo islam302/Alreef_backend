@@ -1,6 +1,7 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>Payment failed — #{{ order_number }}</h2>
-<p>Your payment of {{ amount }} {{ currency }} could not be completed. You can retry from your order page.</p>
-<p><a href="{{ frontend_url }}/orders/{{ order_number }}">Retry payment</a></p>
+<h2 style="margin:0 0 12px;color:#a94832;">الدفع ماكملش</h2>
+<p>محاولة دفع <strong>{{ amount }} {{ currency }}</strong> للطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong> ماتمّتش.</p>
+<p>تقدر تشوف حالة الطلب من الرابط ده، ولو محتاج مساعدة كلّمنا.</p>
+<p style="margin:24px 0;"><a href="{% if order_url %}{{ order_url }}{% else %}{{ frontend_url }}/account/orders/{{ order_number }}{% endif %}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">شوف الطلب</a></p>
 {% endblock %}

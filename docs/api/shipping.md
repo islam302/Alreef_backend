@@ -79,8 +79,10 @@ Auth: `IsAuthenticated`, scoped to `order__user=request.user` — a customer can
   "data": {
     "tracking_number": "BST123456789EG",
     "carrier_code": "bosta",
+    "tracking_url": "https://…",
     "status": "in_transit",
     "estimated_delivery": "2026-08-18",
+    "shipped_at": "2026-08-16T08:00:00Z",
     "delivered_at": null,
     "events": [
       { "status": "picked_up", "description": "Package picked up from warehouse", "location": "Cairo", "occurred_at": "2026-08-16T08:00:00Z" },
@@ -94,3 +96,14 @@ Auth: `IsAuthenticated`, scoped to `order__user=request.user` — a customer can
 `Shipment.status` (`ShipmentStatus`): `pending | picked_up | in_transit | out_for_delivery | delivered | failed | returned | cancelled`. `ShipmentEvent` rows are append-only tracking history, populated by carrier webhooks or manual admin updates.
 
 Errors: `NOT_FOUND` (404, unknown tracking number or not owned by caller).
+
+## GET /api/v1/shipping/orders/{order_number}/shipments/
+
+Auth: `IsAuthenticated`. The shipments on one of the caller's orders, oldest first, each in the tracking shape above. Another customer's order (or an order not yet shipped) returns `[]`. This is how the storefront learns the tracking number staff entered.
+
+## Staff (`/api/v1/admin-api/`, `IsAdminUser`, audited)
+
+- `GET shipping/governorates/?search=` — every governorate with its zone (`zone_size`, `zone_count`) and the rates of each method. `PATCH shipping/governorates/{id}/` `{is_active}` turns delivery there on/off.
+- `POST shipping/governorates/{id}/rate/` `{method, base_price, free_shipping_threshold?, is_active?, apply_to_zone?}` — sets a flat fee. Without `apply_to_zone` a governorate sharing a zone is moved into its own zone (copying its other rates), so neighbours keep their fees.
+- `shipping/zones/`, `shipping/rates/` — full CRUD; `shipping/methods/` — list/create/update (no delete; deactivate instead). Money fields are non-negative.
+- `POST orders/{order_number}/shipment/` `{carrier_code?, tracking_number?, tracking_url?, status?, estimated_delivery?, note?}` — creates the order's shipment or updates its latest one; status changes and notes append `ShipmentEvent`s. Returns the order detail, which now includes `shipments`.

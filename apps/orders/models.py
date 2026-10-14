@@ -61,13 +61,18 @@ class Order(BaseModel):
     """
 
     order_number = models.CharField(max_length=30, unique=True, db_index=True)
-    user = models.ForeignKey("users.User", on_delete=models.PROTECT, related_name="orders")
+    # Null for a guest order: somebody who checked out with a name, a phone and
+    # an address but no account. The snapshots below are then the only record of
+    # who they are, and a guest reaches the order through a signed access token
+    # or its number plus their phone (apps.orders.guest) — never by user id.
+    user = models.ForeignKey("users.User", on_delete=models.PROTECT, related_name="orders", null=True, blank=True)
     status = models.CharField(max_length=20, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     currency = models.CharField(max_length=3, default="EGP")
 
     # Snapshots — never re-derived from live data after creation.
     customer_name = models.CharField(max_length=150)
-    customer_email = models.EmailField()
+    # Blank only for a guest who chose not to give one; such an order gets no email.
+    customer_email = models.EmailField(blank=True)
     customer_phone = models.CharField(max_length=32)
     shipping_address_snapshot = models.JSONField(default=dict)
     shipping_method_name = models.CharField(max_length=100, blank=True)
@@ -111,6 +116,10 @@ class Order(BaseModel):
 
     def can_cancel(self) -> bool:
         return self.can_transition_to(OrderStatus.CANCELLED)
+
+    @property
+    def is_guest(self) -> bool:
+        return self.user_id is None
 
 
 class OrderItem(BaseModel):

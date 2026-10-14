@@ -1,0 +1,8 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2 style="margin:0 0 12px;color:#a94832;">طلبك اتلغى</h2>
+<p>{% if customer_name %}أهلاً {{ customer_name }}، {% endif %}حبينا نبلّغك إن الطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong> اتلغى.</p>
+{% if was_paid %}<p>بما إنك كنت دفعت قيمة الطلب، هنتواصل معاك بخصوص رجوع المبلغ.</p>{% endif %}
+<p>لو ده حصل بالغلط أو عندك أي سؤال، رد على الإيميل ده أو كلّمنا من صفحة التواصل.</p>
+<p style="margin:24px 0;"><a href="{{ frontend_url }}/contact" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">تواصل معانا</a></p>
+{% endblock %}

@@ -103,13 +103,39 @@ class ShipmentTrackingView(RetrieveAPIView):
         return Shipment.objects.filter(order__user=self.request.user).prefetch_related("events")
 
     def retrieve(self, request, *args, **kwargs):
-        shipment = self.get_object()
-        data = {
-            "tracking_number": shipment.tracking_number,
-            "carrier_code": shipment.carrier_code,
-            "status": shipment.status,
-            "estimated_delivery": shipment.estimated_delivery,
-            "delivered_at": shipment.delivered_at,
-            "events": shipment.events.all(),
-        }
-        return success_response(ShipmentTrackingSerializer(data).data)
+        return success_response(ShipmentTrackingSerializer(_tracking_payload(self.get_object())).data)
+
+
+def _tracking_payload(shipment) -> dict:
+    return {
+        "tracking_number": shipment.tracking_number,
+        "carrier_code": shipment.carrier_code,
+        "tracking_url": shipment.tracking_url,
+        "status": shipment.status,
+        "estimated_delivery": shipment.estimated_delivery,
+        "shipped_at": shipment.shipped_at,
+        "delivered_at": shipment.delivered_at,
+        "events": shipment.events.all(),
+    }
+
+
+@extend_schema(tags=["Shipping"], responses=envelope(ShipmentTrackingSerializer, name="OrderShipments", many=True))
+class OrderShipmentsView(APIView):
+    """
+    GET /api/v1/shipping/orders/<order_number>/shipments/
+
+    The shipments staff booked on one of the caller's orders, with carrier,
+    tracking number and link. This is how a customer learns their tracking
+    number; the route above needs them to know it already. Someone else's
+    order answers with an empty list, exactly like an order not yet shipped.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, order_number):
+        shipments = (
+            Shipment.objects.filter(order__order_number=order_number, order__user=request.user)
+            .prefetch_related("events")
+            .order_by("created_at")
+        )
+        return success_response(ShipmentTrackingSerializer([_tracking_payload(s) for s in shipments], many=True).data)

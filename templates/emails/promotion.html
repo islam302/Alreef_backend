@@ -1,6 +1,6 @@
 {% extends "emails/_base.html" %}
 {% block content %}
-<h2>{{ promotion_title }}</h2>
+<h2 style="margin:0 0 12px;color:#174b3a;">{{ promotion_title }}</h2>
 <p>{{ promotion_body }}</p>
-<p><a href="{{ frontend_url }}">Shop now</a></p>
+<p style="margin:24px 0;"><a href="{{ frontend_url }}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">تسوّق دلوقتي</a></p>
 {% endblock %}

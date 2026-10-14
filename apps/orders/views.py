@@ -9,6 +9,8 @@ from apps.core.schema import envelope
 from apps.orders import services
 from apps.orders.models import Order, ReturnRequest
 from apps.orders.serializers import (
+    GuestOrderLookupSerializer,
+    GuestOrderStatusSerializer,
     OrderCancelSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
@@ -91,3 +93,83 @@ class ReturnRequestListView(ListAPIView):
 
     def list(self, request, *args, **kwargs):
         return success_response(self.get_serializer(self.get_queryset(), many=True).data)
+
+
+@extend_schema(
+    tags=["Orders"], request=GuestOrderLookupSerializer,
+    responses=envelope(GuestOrderStatusSerializer, name="GuestOrderLookup"),
+)
+class GuestOrderLookupView(APIView):
+    """
+    POST /api/v1/orders/lookup/ — a guest order, for somebody without an account.
+
+    `{"token": "..."}` (what checkout returned) or
+    `{"order_number": "...", "phone": "..."}`. A POST so neither key ends up in
+    an access log or a Referer header.
+
+    Every miss — unknown number, wrong phone, bad or expired token, an order that
+    belongs to an account — is the same 404 with the same message, so the
+    endpoint cannot be used to learn which order numbers exist. See
+    apps/orders/guest.py for the rest of the reasoning.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    # Unauthenticated callers guessing at a secret (the phone): its own tight
+    # budget, keyed per client IP, on top of the per-order-number cap.
+    throttle_scope = "order_lookup"
+
+    def post(self, request):
+        from apps.orders import guest
+
+        serializer = GuestOrderLookupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if data["token"]:
+            order = guest.order_for_token(data["token"])
+            by_token = True
+        else:
+            try:
+                order = guest.order_for_number_and_phone(data["order_number"], data["phone"])
+            except guest.LookupLocked:
+                raise ApplicationError(
+                    ErrorCodes.THROTTLED,
+                    "Too many attempts for this order number. Please try again later.",
+                )
+            by_token = False
+
+        if order is None:
+            raise ApplicationError(
+                ErrorCodes.ORDER_NOT_FOUND,
+                "We could not find an order with these details.",
+            )
+
+        if by_token:
+            # The token is what the payment-return trip carries for a guest, so
+            # it is also what may ask the gateway for news — the same
+            # reconciliation PaymentStatusView does for an account. Not on the
+            # phone path: that would let anybody holding a number and a phone
+            # make us call the gateway.
+            _reconcile_open_payment(order)
+
+        order = Order.objects.prefetch_related("items", "status_history", "payments").get(pk=order.pk)
+        return success_response(GuestOrderStatusSerializer(order).data)
+
+
+def _reconcile_open_payment(order):
+    import logging
+
+    from apps.payments.models import PaymentStatus
+    from apps.payments.services import reconcile_payment
+
+    payment = order.payments.order_by("-created_at").first()
+    if payment is None or payment.provider == "cod":
+        return
+    if payment.status not in (PaymentStatus.PENDING, PaymentStatus.REQUIRES_ACTION, PaymentStatus.AUTHORIZED):
+        return
+    try:
+        reconcile_payment(payment)
+    except ApplicationError as exc:
+        # A gateway that is down must not break the page the customer is
+        # waiting on; they see the status we already hold.
+        logging.getLogger(__name__).warning("guest lookup: payment %s could not reconcile: %s", payment.id, exc)

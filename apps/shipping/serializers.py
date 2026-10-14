@@ -47,7 +47,10 @@ class ShipmentEventSerializer(serializers.ModelSerializer):
 class ShipmentTrackingSerializer(serializers.Serializer):
     tracking_number = serializers.CharField()
     carrier_code = serializers.CharField()
+    # The carrier's own tracking page, when staff entered one on the order.
+    tracking_url = serializers.CharField()
     status = serializers.CharField()
     estimated_delivery = serializers.DateField(allow_null=True)
+    shipped_at = serializers.DateTimeField(allow_null=True)
     delivered_at = serializers.DateTimeField(allow_null=True)
     events = ShipmentEventSerializer(many=True)

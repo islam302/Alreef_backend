@@ -141,7 +141,7 @@ def test_an_old_failure_callback_is_still_ignored(api_client, gateways_enabled, 
 
 
 def test_payment_for_a_cancelled_order_is_kept_and_flagged_for_refund(
-    api_client, staff_client, gateways_enabled, gateway_payment
+    api_client, staff_client, gateways_enabled, gateway_payment, django_capture_on_commit_callbacks
 ):
     """
     The order was cancelled while the callback was delayed. The money is real:
@@ -154,7 +154,10 @@ def test_payment_for_a_cancelled_order_is_kept_and_flagged_for_refund(
     cancel_order(payment.order, reason="staff cancelled")
     payment.refresh_from_db()
 
-    with mock.patch("apps.notifications.tasks.send_email_task.delay") as send:
+    # Emails are queued on commit; run those callbacks so the assertion below
+    # sees what would really have been sent, rather than passing on an empty list.
+    with mock.patch("apps.notifications.tasks.send_email_task.delay") as send, \
+            django_capture_on_commit_callbacks(execute=True):
         assert post_paymob(api_client, paymob_transaction(payment, id=701)).status_code == 200
 
     payment.refresh_from_db()
@@ -185,10 +188,13 @@ def test_a_second_successful_charge_is_flagged_not_swallowed(api_client, gateway
     assert "refund" in event.rejection_reason.lower()
 
 
-def test_the_same_success_delivered_twice_is_not_a_second_charge(api_client, gateways_enabled, gateway_payment):
+def test_the_same_success_delivered_twice_is_not_a_second_charge(
+    api_client, gateways_enabled, gateway_payment, django_capture_on_commit_callbacks
+):
     payment = gateway_payment(provider="paymob", method="card", status=PaymentStatus.REQUIRES_ACTION)
     transaction = paymob_transaction(payment, id=901)
-    with mock.patch("apps.notifications.tasks.send_email_task.delay") as send:
+    with mock.patch("apps.notifications.tasks.send_email_task.delay") as send, \
+            django_capture_on_commit_callbacks(execute=True):
         assert post_paymob(api_client, transaction).status_code == 200
         assert post_paymob(api_client, transaction).status_code == 200
 

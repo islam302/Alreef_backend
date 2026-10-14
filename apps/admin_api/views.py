@@ -48,13 +48,19 @@ from apps.admin_api.serializers import (
     AdminRefundSerializer,
     AdminReturnRequestSerializer,
     AdminReviewSerializer,
+    AdminGovernorateShippingSerializer,
+    AdminShippingMethodSerializer,
+    AdminShippingRateSerializer,
+    AdminShippingZoneSerializer,
     AdminStaffSerializer,
     AdminStoreReviewSerializer,
     OrderCancelAdminSerializer,
     OrderNoteSerializer,
     OrderStatusChangeSerializer,
     ProductOfferSerializer,
+    GovernorateRateSerializer,
     ReturnDecisionSerializer,
+    ShipmentWriteSerializer,
     StockAdjustmentSerializer,
 )
 from apps.audit.models import AuditAction, AuditLog
@@ -70,6 +76,8 @@ from apps.orders.models import Order, OrderStatus, ReturnRequest
 from apps.orders.services import complete_return_and_refund, decide_return_request, transition_status
 from apps.payments.models import Payment
 from apps.reviews.models import Review, StoreReview
+from apps.shipping.models import Governorate, ShippingMethod, ShippingRate, ShippingZone
+from apps.shipping.services import save_order_shipment, set_governorate_rate
 from apps.users.models import User
 
 
@@ -141,7 +149,10 @@ class AdminOrderViewSet(ReadOnlyEnvelopeViewSet):
     def get_queryset(self):
         queryset = (
             Order.objects.select_related("user")
-            .prefetch_related("items", "status_history__changed_by", "payments__refunds")
+            .prefetch_related(
+                "items", "status_history__changed_by", "payments__refunds",
+                "shipments__shipping_method", "shipments__events",
+            )
             .annotate(item_count=Count("items", distinct=True))
         )
         params = self.request.query_params
@@ -196,6 +207,20 @@ class AdminOrderViewSet(ReadOnlyEnvelopeViewSet):
         order.save(update_fields=["notes"])
         self._audit(AuditAction.UPDATE, order, {"notes": order.notes})
         return success_response(AdminOrderDetailSerializer(order).data, message="Note saved.")
+
+    @extend_schema(request=ShipmentWriteSerializer, responses=envelope(AdminOrderDetailSerializer, name="AdminOrderShipment"))
+    @action(detail=True, methods=["post"], url_path="shipment")
+    def shipment(self, request, order_number=None):
+        """Create the order's shipment, or update its latest one: carrier,
+        tracking number and link, status. The customer's tracking route reads
+        the same row, so what staff type here is what the customer sees."""
+        order = self.get_object()
+        serializer = ShipmentWriteSerializer(data=request.data, context={"order": order})
+        serializer.is_valid(raise_exception=True)
+        shipment, changes = save_order_shipment(order=order, data=serializer.validated_data)
+        self._audit(AuditAction.UPDATE, order, {"shipment": shipment.pk, **changes})
+        order = self.get_queryset().get(pk=order.pk)
+        return success_response(AdminOrderDetailSerializer(order).data, message="Shipment saved.")
 
 
 @extend_schema(tags=["Admin"])
@@ -826,6 +851,105 @@ class AdminPaymentMethodsView(APIView):
                 "webhook_urls": all_webhook_urls(),
             }
         )
+
+
+# ==========================================================================
+# Shipping
+# ==========================================================================
+@extend_schema(tags=["Admin"])
+class AdminShippingGovernorateViewSet(ReadOnlyEnvelopeViewSet):
+    """
+    The 27 governorates with what delivery to each costs - the dashboard's
+    shipping screen. PATCH turns delivery to a governorate on or off (an
+    inactive one disappears from the address form and cannot be quoted);
+    POST `rate/` sets one method's fee there.
+
+    Governorates themselves are reference data and are never created or
+    deleted from here.
+    """
+
+    http_method_names = ["get", "post", "patch", "head", "options"]
+    serializer_class = AdminGovernorateShippingSerializer
+    pagination_class = None
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["name_ar", "name_en", "code"]
+
+    def get_queryset(self):
+        return Governorate.objects.prefetch_related(
+            "zones__governorates", "zones__rates__method", "zones__rates__zone",
+        ).order_by("sort_order", "name_en")
+
+    def partial_update(self, request, *args, **kwargs):
+        governorate = self.get_object()
+        serializer = self.get_serializer(governorate, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        self._audit(AuditAction.UPDATE, governorate, {"updated": list(serializer.validated_data.keys())})
+        governorate = self.get_queryset().get(pk=governorate.pk)
+        return success_response(self.get_serializer(governorate).data, message="Saved.")
+
+    @extend_schema(request=GovernorateRateSerializer, responses=envelope(AdminGovernorateShippingSerializer, name="AdminGovernorateRate"))
+    @action(detail=True, methods=["post"], url_path="rate")
+    def set_rate(self, request, pk=None):
+        governorate = self.get_object()
+        serializer = GovernorateRateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        rate = set_governorate_rate(
+            governorate=governorate, method=data["method"], base_price=data["base_price"],
+            free_shipping_threshold=data["free_shipping_threshold"], is_active=data["is_active"],
+            apply_to_zone=data["apply_to_zone"],
+        )
+        threshold = data["free_shipping_threshold"]
+        # Logged against the rate (no audit_model_name here), which is what changed.
+        self._audit(AuditAction.UPDATE, rate, {
+            "governorate": governorate.code, "zone": rate.zone.name, "method": rate.method.name,
+            "base_price": str(data["base_price"]),
+            "free_shipping_threshold": None if threshold is None else str(threshold),
+            "is_active": data["is_active"], "apply_to_zone": data["apply_to_zone"],
+        })
+        governorate = self.get_queryset().get(pk=governorate.pk)
+        return success_response(self.get_serializer(governorate).data, message="Shipping fee saved.")
+
+
+@extend_schema(tags=["Admin"])
+class AdminShippingZoneViewSet(EnvelopeViewSet):
+    serializer_class = AdminShippingZoneSerializer
+    audit_model_name = "ShippingZone"
+    pagination_class = None
+
+    def get_queryset(self):
+        return ShippingZone.objects.prefetch_related("governorates", "rates__method", "rates__zone").order_by("name")
+
+
+@extend_schema(tags=["Admin"])
+class AdminShippingRateViewSet(EnvelopeViewSet):
+    serializer_class = AdminShippingRateSerializer
+    audit_model_name = "ShippingRate"
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = ShippingRate.objects.select_related("zone", "method").order_by("zone__name", "method__sort_order")
+        if self.request.query_params.get("zone"):
+            queryset = queryset.filter(zone_id=self.request.query_params["zone"])
+        return queryset
+
+
+@extend_schema(tags=["Admin"])
+class AdminShippingMethodViewSet(ReadOnlyEnvelopeViewSet):
+    """Create and edit, but never delete: shipments point at their method
+    (PROTECT), so a used one cannot go. Turning it off is how it is retired."""
+
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    serializer_class = AdminShippingMethodSerializer
+    audit_model_name = "ShippingMethod"
+    pagination_class = None
+    queryset = ShippingMethod.objects.order_by("sort_order", "name")
+
+    # Borrowed rather than inherited: EnvelopeViewSet would also bring `destroy`.
+    create = EnvelopeViewSet.create
+    update = EnvelopeViewSet.update
+    partial_update = EnvelopeViewSet.partial_update
 
 
 # ==========================================================================

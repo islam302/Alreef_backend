@@ -67,7 +67,12 @@ def _refresh_cart_lines(items):
 
 def calculate_totals(
     *, cart, address, shipping_method_id, payment_method: str, coupon_code: str = "", user=None,
+    phone: str = "",
 ) -> CheckoutTotals:
+    """
+    `phone` identifies a guest for the coupon's per-customer limit; a signed-in
+    customer is identified by `user` and the phone is ignored.
+    """
     items = list(cart.items.select_related("variant__product").all())
     if not items:
         raise ApplicationError(ErrorCodes.CART_EMPTY, "Cart is empty.")
@@ -89,7 +94,7 @@ def calculate_totals(
         # and the coupon's scope have to be enforced here too — otherwise the
         # cart's coupon endpoint is the only place they apply, and checkout
         # never asks it.
-        coupon = validate_coupon_for_cart(code=coupon_code, cart=cart, user=user)
+        coupon = validate_coupon_for_cart(code=coupon_code, cart=cart, user=user, phone="" if user else phone)
         coupon_discount = compute_discount(coupon=coupon, items=items, subtotal=subtotal)
         if coupon.discount_type == "free_shipping":
             promo_free_shipping = True
@@ -164,10 +169,15 @@ def calculate_totals(
 @transaction.atomic
 def create_order_from_cart(
     *, user, cart, address, shipping_method_id, payment_method: str, coupon_code: str = "",
-    notes: str = "", idempotency_key: str = "",
+    notes: str = "", idempotency_key: str = "", contact_email: str = "",
 ):
     """
     Turn the cart into an Order and start its payment.
+
+    `user` is None for a guest checkout. `address` is then an unsaved Address
+    built from the request (a guest has no address book), and `contact_email`
+    is the optional address they gave; a signed-in customer's email always
+    comes from their account.
 
     `idempotency_key` is the checkout key from the request header. It is passed
     down to the Payment so that a retry which slips past the cache-backed
@@ -207,6 +217,7 @@ def create_order_from_cart(
         raise ApplicationError(ErrorCodes.CART_EMPTY, "Cart is empty.")
     _refresh_cart_lines(items)
 
+    coupon = None
     if coupon_code:
         # Serialise checkouts spending the same coupon. Its limits are counted
         # from CouponUsage rows, and two checkouts that both read the count
@@ -215,11 +226,12 @@ def create_order_from_cart(
         # checkout reads the first one's usage.
         from apps.coupons.models import Coupon
 
-        Coupon.objects.select_for_update().filter(code__iexact=coupon_code).first()
+        coupon = Coupon.objects.select_for_update().filter(code__iexact=coupon_code).first()
 
+    phone = str(address.phone)
     totals = calculate_totals(
         cart=cart, address=address, shipping_method_id=shipping_method_id, payment_method=payment_method,
-        coupon_code=coupon_code, user=user,
+        coupon_code=coupon_code, user=user, phone=phone,
     )
 
     shipping_method = ShippingMethod.objects.filter(pk=shipping_method_id).first() if shipping_method_id else None
@@ -228,11 +240,16 @@ def create_order_from_cart(
         user=user,
         currency=cart.currency,
         customer_name=address.full_name,
-        customer_email=user.email,
-        customer_phone=str(address.phone),
+        customer_email=user.email if user else (contact_email or ""),
+        customer_phone=phone,
         shipping_address_snapshot={
-            "label": address.label, "full_name": address.full_name, "phone": str(address.phone),
-            "governorate": address.governorate.name_en, "city": address.city.name_en if address.city else "",
+            "label": address.label, "full_name": address.full_name, "phone": phone,
+            # Arabic for everything people read (the order page, tracking, the
+            # invoice); the English names kept beside them for the card gateway.
+            "governorate": address.governorate.name_ar or address.governorate.name_en,
+            "city": (address.city.name_ar or address.city.name_en) if address.city else "",
+            "governorate_en": address.governorate.name_en,
+            "city_en": address.city.name_en if address.city else "",
             "district": address.district, "street": address.street, "building": address.building,
             "floor": address.floor, "apartment": address.apartment, "landmark": address.landmark,
             "postal_code": address.postal_code, "notes": address.notes,
@@ -249,6 +266,18 @@ def create_order_from_cart(
         grand_total=totals.grand_total,
         notes=notes,
     )
+
+    if coupon is not None:
+        # The use is reserved now, while the coupon row is still locked, not when
+        # the order is confirmed. Recording it at confirmation left a gap as long
+        # as a card payment takes: every pending order was invisible to the
+        # limit, so ten customers could all start paying with a code capped at
+        # one — and the confirmations then skipped the record once the cap was
+        # hit, so the extra uses were never even counted. Cancelling the order
+        # gives the use back (orders.services.cancel_order).
+        from apps.coupons.services import record_usage
+
+        record_usage(coupon=coupon, user=user, order=order, discount_amount=totals.coupon_discount)
 
     for item in items:
         reserve_stock(variant=item.variant, quantity=item.quantity, order=order)
@@ -279,6 +308,17 @@ def create_order_from_cart(
             ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
             "That payment method is not available at the moment. Please choose another.",
         ) from exc
+
+    if payment.order_id != order.id:
+        # create_payment_for_order hands back an existing Payment for a key it
+        # has already seen, whichever order that Payment belongs to. A key
+        # reused across two different checkouts would otherwise attach somebody
+        # else's payment — its reference, its redirect — to this response. The
+        # order rolls back with the error.
+        raise ApplicationError(
+            ErrorCodes.IDEMPOTENCY_KEY_CONFLICT,
+            "Idempotency-Key was already used for another order.",
+        )
 
     cart.status = CartStatus.CONVERTED
     cart.save(update_fields=["status"])
@@ -316,9 +356,12 @@ def confirm_order(order: Order, *, payment_received: bool = True):
     """
     from apps.inventory.models import StockReservation, StockReservationStatus
     from apps.inventory.services import consume_reservation
-    from apps.notifications.tasks import send_email_task
-    from apps.orders.services import transition_status
+    from apps.notifications.services import queue_email
+    from apps.orders.services import order_email_context, transition_status
 
+    # The "order confirmed" email is sent by the transition itself
+    # (orders.services.STATUS_EMAILS), so it goes out once, on the move to
+    # CONFIRMED, however many times this function is reached for the order.
     if order.status == OrderStatus.PENDING:
         order = transition_status(order, OrderStatus.CONFIRMED)
 
@@ -326,30 +369,40 @@ def confirm_order(order: Order, *, payment_received: bool = True):
         consume_reservation(reservation)
 
     if order.coupon_code:
-        from apps.coupons.services import get_valid_coupon, record_usage
+        # The use is reserved at checkout. This covers orders placed before
+        # that was true and still being paid for: record what was promised
+        # without re-validating — the customer already has the discount, and
+        # refusing to count it would only hide it from the limit.
+        from apps.coupons.models import Coupon, CouponUsage
+        from apps.coupons.services import record_usage
 
-        try:
-            coupon = get_valid_coupon(order.coupon_code)
-            record_usage(coupon=coupon, user=order.user, order=order, discount_amount=order.coupon_discount)
-        except ApplicationError:
-            pass  # Coupon may have been deactivated after order placement — usage tracking is best-effort.
+        if not CouponUsage.objects.filter(order=order).exists():
+            coupon = Coupon.objects.filter(code__iexact=order.coupon_code).first()
+            if coupon is not None:
+                record_usage(coupon=coupon, user=order.user, order=order, discount_amount=order.coupon_discount)
 
-    send_email_task.delay(
-        to=order.customer_email, subject="Order confirmed", template_name="order_confirmation",
-        context={"order_number": order.order_number, "total": str(order.grand_total.amount), "currency": order.currency},
-        event="order_created", user_id=order.user_id,
-    )
-    if payment_received:
-        send_email_task.delay(
-            to=order.customer_email, subject="Payment received", template_name="payment_confirmation",
-            context={"order_number": order.order_number, "amount": str(order.grand_total.amount), "currency": order.currency},
-            event="payment_success", user_id=order.user_id,
+    # Not for cash on delivery: that money is handed to the courier at the
+    # door, and this function runs again when the collection is recorded — a
+    # "payment received" email after the "delivered" one is noise. Asked of the
+    # payment that was captured rather than the order's method snapshot, because
+    # the payment is what actually arrived.
+    from apps.payments.models import PaymentStatus
+
+    paid_in_cash = order.payments.filter(provider="cod", status=PaymentStatus.CAPTURED).exists()
+    if payment_received and not paid_in_cash:
+        context = order_email_context(order)
+        context["amount"] = context["total"]
+        queue_email(
+            to=order.customer_email, subject="payment_confirmation", template_name="payment_confirmation",
+            context=context, event="payment_success", user_id=order.user_id,
         )
 
-    try:
-        from apps.loyalty.services import award_points_for_order
+    if order.user_id is not None:
+        # Points belong to an account. A guest has none to hold them.
+        try:
+            from apps.loyalty.services import award_points_for_order
 
-        award_points_for_order(order)
-    except ImportError:
-        pass
+            award_points_for_order(order)
+        except ImportError:
+            pass
     return order
