@@ -15,6 +15,11 @@ STALE_AFTER = timedelta(minutes=10)
 #: forever is a slow leak of rate limit.
 GIVE_UP_AFTER = timedelta(days=14)
 
+#: How long after a decline or a cancellation we still ask whether a success
+#: followed. A customer retrying on the same Paymob page does so within minutes;
+#: two days covers a wallet confirmation that crawls in overnight.
+LATE_SUCCESS_WINDOW = timedelta(days=2)
+
 
 @shared_task
 def reconcile_pending_payments_task():
@@ -43,19 +48,33 @@ def reconcile_pending_payments_task():
     from apps.payments.services import reconcile_payment
     from apps.payments.webhooks import WEBHOOK_PROVIDERS
 
+    from django.db.models import Q
+
     now = timezone.now()
     stuck = Payment.objects.filter(
-        status__in=[
-            PaymentStatus.PENDING,
-            PaymentStatus.REQUIRES_ACTION,
-            PaymentStatus.AUTHORIZED,
-        ],
+        Q(
+            status__in=[
+                PaymentStatus.PENDING,
+                PaymentStatus.REQUIRES_ACTION,
+                PaymentStatus.AUTHORIZED,
+            ],
+            created_at__gt=now - GIVE_UP_AFTER,
+        )
+        # A refund that timed out, however old the payment: only the gateway
+        # can say whether it happened, and until it does nothing else can be refunded.
+        | Q(status=PaymentStatus.REFUND_PENDING)
+        # A success can land behind a decline (the customer tried another card)
+        # or behind a cancellation, and if its callback is lost too, only asking
+        # finds it.
+        | Q(
+            status__in=[PaymentStatus.FAILED, PaymentStatus.CANCELLED],
+            created_at__gt=now - LATE_SUCCESS_WINDOW,
+        ),
         # Only routes there is something to ask. Cash on delivery and InstaPay
         # are settled by a person, and their `get_status` echoes our own record
         # back, so including them would be a query that cannot learn anything.
         provider__in=WEBHOOK_PROVIDERS,
         created_at__lt=now - STALE_AFTER,
-        created_at__gt=now - GIVE_UP_AFTER,
     ).order_by("created_at")
 
     reconciled = 0
@@ -117,3 +136,71 @@ def expire_stale_payments_task():
     if expired:
         logger.info("Expired %s abandoned payment(s)", expired)
     return expired
+
+
+#: How long an online order may wait for its payment before its stock goes
+#: back on sale. Long enough for a slow wallet confirmation; short enough that
+#: abandoned card checkouts do not quietly sell out a product.
+UNPAID_ORDER_HOLD = timedelta(hours=24)
+
+
+@shared_task
+def release_unpaid_orders_task():
+    """
+    Cancel online orders that were never paid, so their stock returns.
+
+    Order reservations do not expire, so before this an abandoned card or
+    wallet checkout held its jars for good. Each order's payment is asked about
+    one last time first; one that turns out paid is confirmed instead. If a
+    success still arrives after the cancel, it is recorded and flagged for a
+    refund (services.mark_payment_captured), so cancelling never loses money.
+
+    InstaPay is left alone: a person checks those transfers, and the shop, not a
+    timer, decides when to give up on one. A gateway that cannot be reached
+    leaves the order alone too: not knowing is not the same as unpaid.
+    """
+    from django.utils import timezone
+
+    from apps.core.error_codes import ApplicationError
+    from apps.orders.models import Order, OrderStatus
+    from apps.orders.services import cancel_order
+    from apps.payments import state
+    from apps.payments.services import mark_payment_expired, reconcile_payment
+    from apps.payments.webhooks import WEBHOOK_PROVIDERS
+
+    cutoff = timezone.now() - UNPAID_ORDER_HOLD
+    orders = Order.objects.filter(
+        status=OrderStatus.PENDING,
+        created_at__lt=cutoff,
+        payments__provider__in=WEBHOOK_PROVIDERS,
+    ).distinct()
+
+    released = 0
+    for order in orders.iterator():
+        try:
+            payments = list(order.payments.filter(provider__in=WEBHOOK_PROVIDERS))
+            unknown = False
+            for payment in payments:
+                if payment.status in state.IN_FLIGHT or payment.status in state.LATE_CAPTURE_FROM:
+                    try:
+                        payment = reconcile_payment(payment)
+                    except ApplicationError:
+                        unknown = True
+                        continue
+                if payment.status in state.IN_FLIGHT:
+                    mark_payment_expired(payment, reason="Not paid within 24 hours.")
+            if unknown:
+                continue
+            order.refresh_from_db()
+            if order.status != OrderStatus.PENDING:
+                continue  # It was paid after all, and is now confirmed.
+            if order.payments.filter(status__in=state.SETTLED).exists():
+                continue
+            cancel_order(order, reason="Not paid within 24 hours.")
+            released += 1
+        except Exception:
+            logger.exception("Could not release unpaid order %s", order.pk)
+
+    if released:
+        logger.info("Released %s unpaid order(s)", released)
+    return released

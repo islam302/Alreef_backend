@@ -1,5 +1,6 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import extend_schema
-from rest_framework import permissions
+from rest_framework import permissions, serializers
 from rest_framework.generics import ListAPIView
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.views import APIView
@@ -109,7 +110,12 @@ class ReviewCreateView(APIView):
 
         images = request.FILES.getlist("images")[:MAX_REVIEW_IMAGES]
         for image in images:
-            validate_image_file(image)
+            # validate_image_file raises Django's ValidationError, which the API
+            # error handler does not know — a rejected upload came back as a 500.
+            try:
+                validate_image_file(image)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"images": exc.messages}) from exc
 
         review = services.create_review(
             user=request.user, product=product, rating=serializer.validated_data["rating"],

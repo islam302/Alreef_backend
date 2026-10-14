@@ -136,9 +136,19 @@ def resolve_user(provider, uid, email, email_verified, first_name="", last_name=
                 user = User.objects.get(email__iexact=email)
                 created = False
         elif not user.email_verified:
-            # The provider just proved this person owns the address.
+            # The provider just proved this person owns the address — which
+            # means nobody had before. Whoever registered it may not have been
+            # them: anyone can sign up with someone else's email, and the owner
+            # signing in with Google would then be walking into an account the
+            # squatter still holds the password and sessions for. So the
+            # unproven password and every session it opened go; the owner can
+            # set a password of their own through password reset.
+            from apps.users.services import revoke_all_sessions
+
             user.email_verified = True
-            user.save(update_fields=["email_verified"])
+            user.set_unusable_password()
+            user.save(update_fields=["email_verified", "password"])
+            revoke_all_sessions(user)
         SocialAccount.objects.get_or_create(provider=provider, uid=uid, defaults={"user": user, "email": email})
         if not user.is_active:
             raise ApplicationError(ErrorCodes.AUTH_ACCOUNT_DISABLED, "This account has been disabled.")

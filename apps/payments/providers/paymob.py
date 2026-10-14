@@ -359,7 +359,13 @@ class PaymobPaymentProvider(PaymentProvider):
         if not payment.provider_reference:
             return RefundResult(success=False, error="No Paymob transaction to refund.")
         try:
+            # No refund has been asked for yet, so any failure here is a clean no.
             token = self._accept_auth_token()
+        except (GatewayError, NotImplementedError) as exc:
+            message = getattr(exc, "message", str(exc))
+            logger.warning("paymob refund auth failed for payment %s: %s", payment.id, message)
+            return RefundResult(success=False, error=message, raw=getattr(exc, "payload", {}))
+        try:
             response = self.client.post(
                 self.REFUND_PATH,
                 json_body={
@@ -368,10 +374,14 @@ class PaymobPaymentProvider(PaymentProvider):
                     "amount_cents": self._to_cents(getattr(amount, "amount", amount)),
                 },
             )
-        except (GatewayError, NotImplementedError) as exc:
-            message = getattr(exc, "message", str(exc))
-            logger.warning("paymob refund failed for payment %s: %s", payment.id, message)
-            return RefundResult(success=False, error=message, raw=getattr(exc, "payload", {}))
+        except GatewayError as exc:
+            if not exc.status_code:
+                # The refund request went out and no answer came back. Paymob
+                # may have refunded; saying "failed" here invites a second
+                # refund. The caller keeps it pending and reconciles.
+                raise
+            logger.warning("paymob refund failed for payment %s: %s", payment.id, exc.message)
+            return RefundResult(success=False, error=exc.message, raw=exc.payload)
 
         # Paymob echoes the refund as a child transaction.
         if response.get("success") is False or response.get("pending") is True and not response.get("id"):

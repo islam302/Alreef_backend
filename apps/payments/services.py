@@ -228,19 +228,43 @@ def _record_attempt(payment: Payment, status: str, error_message: str) -> None:
 
 
 @transaction.atomic
-def mark_payment_captured(payment: Payment, *, note: str = ""):
+def mark_payment_captured(
+    payment: Payment, *, note: str = "", from_gateway: bool = False, transaction_reference: str = ""
+):
     """
     The money is ours. Confirm the order.
 
     Only reachable from a verified webhook, a server-side reconciliation, or a
     staff member recording a cash collection. Nothing a browser sends reaches
     this function.
+
+    `from_gateway` is set only by those first two, and is what lets a success
+    overrule a payment we had written off (see state.LATE_CAPTURE_FROM).
+    `transaction_reference` is the gateway's id for the transaction that took
+    the money: refunds and voids are made against it, not against the intention
+    id the payment was created with.
     """
+    from apps.orders.models import Order, OrderStatus
+
     payment = Payment.objects.select_for_update().get(pk=payment.pk)
     if payment.status == PaymentStatus.CAPTURED:
         return payment  # Idempotent: a re-delivered event confirms nothing twice.
 
-    _set_status(payment, PaymentStatus.CAPTURED)
+    if from_gateway and payment.status in payment_state.LATE_CAPTURE_FROM:
+        logger.warning(
+            "payment %s: gateway reports success after we marked it %s; recording the capture",
+            payment.id, payment.status,
+        )
+        payment.status = PaymentStatus.CAPTURED
+        payment.save(update_fields=["status"])
+    else:
+        _set_status(payment, PaymentStatus.CAPTURED)
+
+    if transaction_reference:
+        payment.provider_reference = transaction_reference[:150]
+        payment.metadata = {**payment.metadata, "captured_transaction": transaction_reference[:150]}
+        payment.save(update_fields=["provider_reference", "metadata"])
+
     PaymentTransaction.objects.create(
         payment=payment,
         transaction_type=PaymentTransactionType.CAPTURE,
@@ -250,10 +274,36 @@ def mark_payment_captured(payment: Payment, *, note: str = ""):
         raw_response={"note": note} if note else {},
     )
 
+    order = Order.objects.select_for_update().get(pk=payment.order_id)
+    if order.status == OrderStatus.CANCELLED:
+        # Paid for an order that no longer exists — cancelled while the callback
+        # was delayed. The customer is owed the money back, so the payment says
+        # so where staff will see it, and nobody is told the order is confirmed.
+        _flag_for_refund(payment, "Paid after the order was cancelled.")
+        return payment
+
     from apps.checkout.services import confirm_order_after_payment
 
-    confirm_order_after_payment(payment.order)
+    confirm_order_after_payment(order)
     return payment
+
+
+def _flag_for_refund(payment: Payment, reason: str) -> None:
+    """Mark money we hold but must give back. Logged as an error: it needs a person."""
+    payment.metadata = {**payment.metadata, "needs_refund": True, "needs_refund_reason": reason[:255]}
+    payment.save(update_fields=["metadata"])
+    logger.error("payment %s for order %s needs a refund: %s", payment.id, payment.order_id, reason)
+
+    from apps.audit.models import AuditAction
+    from apps.audit.services import record
+
+    record(
+        actor=None,
+        action=AuditAction.STATUS_CHANGE,
+        model_name="Payment",
+        object_id=payment.id,
+        changes={"needs_refund": True, "reason": reason},
+    )
 
 
 @transaction.atomic
@@ -485,13 +535,29 @@ def reconcile_payment(payment: Payment, *, actor=None) -> Payment:
         logger.warning("payment %s: %s", payment.id, exc)
         return payment
 
+    if payment.status == PaymentStatus.REFUND_PENDING:
+        # A refund call whose answer never came back. What decides it is how
+        # much the gateway says it has refunded, not the payment's status.
+        _settle_pending_refunds(payment, result.raw, mapped, actor=actor)
+        payment.refresh_from_db()
+        return payment
+
     if mapped is None or mapped == payment.status:
         return payment
+
+    stated_amount = _amount_from_raw(result.raw)
+    if mapped == PaymentStatus.CAPTURED and stated_amount is None and _is_gateway(payment.provider):
+        # "Paid" with no sum attached cannot be checked against ours, and
+        # confirming an order on it is how a wrong amount slips through.
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_PROVIDER_ERROR,
+            "The provider reported a payment without its amount.",
+        )
 
     # Verify the gateway is talking about the amount we recorded before we act
     # on what it says. A reconciliation that settles the wrong sum is a silent
     # loss, unlike a webhook mismatch which at least raises.
-    if not _amounts_agree(payment, _amount_from_raw(result.raw)):
+    if not _amounts_agree(payment, stated_amount):
         logger.error(
             "payment %s: reconciliation amount disagrees with our record; not applying",
             payment.id,
@@ -501,7 +567,20 @@ def reconcile_payment(payment: Payment, *, actor=None) -> Payment:
             "The provider reports a different amount for this payment.",
         )
 
-    _apply_mapped_status(payment, mapped, reason="Reconciled with provider.")
+    if not payment_state.can_gateway_transition(payment.status, mapped):
+        # Same rule as an out-of-order webhook: a stale "failed" cannot undo a
+        # capture. Raised so the sweep logs it and staff see it on demand.
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_INVALID_STATE,
+            f"Provider reports '{mapped}' but the payment is '{payment.status}'.",
+        )
+
+    _apply_mapped_status(
+        payment,
+        mapped,
+        reason="Reconciled with provider.",
+        transaction_reference=_transaction_id_from_raw(result.raw),
+    )
 
     from apps.audit.models import AuditAction
     from apps.audit.services import record
@@ -550,10 +629,101 @@ def _amounts_agree(payment: Payment, stated) -> bool:
     return stated == payment.amount.amount.quantize(Decimal("0.01"))
 
 
-def _apply_mapped_status(payment: Payment, mapped: str, *, reason: str = "") -> None:
-    """Route a mapped status to the function that owns that transition."""
+def _is_gateway(provider_code: str) -> bool:
+    from apps.payments.webhooks import WEBHOOK_PROVIDERS
+
+    return provider_code in WEBHOOK_PROVIDERS
+
+
+def _transaction_id_from_raw(raw) -> str:
+    if isinstance(raw, dict) and raw.get("id") not in (None, ""):
+        return str(raw["id"])
+    return ""
+
+
+def _cents_to_amount(raw, key):
+    if not isinstance(raw, dict) or raw.get(key) is None:
+        return None
+    try:
+        return (Decimal(str(raw[key])) / 100).quantize(Decimal("0.01"))
+    except (ArithmeticError, ValueError):
+        return None
+
+
+#: How long a refund the gateway does not show may stay "maybe sent". Paymob
+#: applies a refund at once, so a day without it means it never happened.
+REFUND_CONFIRM_WINDOW = timedelta(hours=24)
+
+
+def _settle_pending_refunds(payment: Payment, raw, mapped, *, actor=None) -> None:
+    """
+    Decide refunds that timed out, from what the gateway says it has refunded.
+
+    * The gateway shows them all → they happened. Mark them processed.
+    * It shows none of them and a day has passed → they never happened. Mark
+      them failed, so the money can be refunded again.
+    * Anything else → wait. Guessing "failed" too early is a second payout.
+    """
+    pending = list(payment.refunds.filter(status=RefundStatus.PENDING).order_by("created_at"))
+    if not pending:
+        return
+
+    zero = Decimal("0.00")
+    processed = sum(
+        (r.amount.amount for r in payment.refunds.filter(status=RefundStatus.PROCESSED)), start=zero
+    )
+    outstanding = sum((r.amount.amount for r in pending), start=zero)
+    total = payment.amount.amount.quantize(Decimal("0.01"))
+
+    refunded = _cents_to_amount(raw, "refunded_amount_cents")
+    if refunded is None and mapped == PaymentStatus.REFUNDED:
+        refunded = total
+    if refunded is None:
+        return
+
+    now = timezone.now()
+    if refunded >= processed + outstanding:
+        for refund in pending:
+            refund.status = RefundStatus.PROCESSED
+            refund.processed_at = now
+            refund.save(update_fields=["status", "processed_at"])
+        outcome = "processed"
+        _set_status(
+            payment,
+            PaymentStatus.REFUNDED if processed + outstanding >= total else PaymentStatus.PARTIALLY_REFUNDED,
+        )
+    elif refunded <= processed and now - pending[0].created_at >= REFUND_CONFIRM_WINDOW:
+        for refund in pending:
+            refund.status = RefundStatus.FAILED
+            refund.save(update_fields=["status"])
+        outcome = "failed"
+        _set_status(payment, PaymentStatus.CAPTURED if processed == 0 else PaymentStatus.PARTIALLY_REFUNDED)
+    else:
+        return
+
+    from apps.audit.models import AuditAction
+    from apps.audit.services import record
+
+    record(
+        actor=actor,
+        action=AuditAction.REFUND,
+        model_name="Payment",
+        object_id=payment.id,
+        changes={"pending_refunds": [r.pk for r in pending], "outcome": outcome, "source": "reconciliation"},
+    )
+
+
+def _apply_mapped_status(payment: Payment, mapped: str, *, reason: str = "", transaction_reference: str = "") -> None:
+    """
+    Route a mapped status to the function that owns that transition.
+
+    Only the gateway's own word reaches here (a verified webhook or a
+    server-side inquiry), which is why a capture is applied with `from_gateway`.
+    """
     if mapped == PaymentStatus.CAPTURED:
-        mark_payment_captured(payment, note=reason)
+        mark_payment_captured(
+            payment, note=reason, from_gateway=True, transaction_reference=transaction_reference
+        )
     elif mapped == PaymentStatus.FAILED:
         mark_payment_failed(payment, error_message=reason)
     elif mapped == PaymentStatus.CANCELLED:
@@ -690,17 +860,41 @@ def process_webhook(*, provider_code: str, headers: dict, body: bytes, query_par
             http_status=409,
         )
 
-    # --- it must not be stale --------------------------------------------
-    event_at = parsed.get("event_at")
-    max_age_hours = int(getattr(settings, "PAYMENT_WEBHOOK_MAX_AGE_HOURS", 72))
-    if event_at is not None and event_at < timezone.now() - timedelta(hours=max_age_hours):
-        return _reject(event, f"Event is older than {max_age_hours}h; not applied.")
-
     # --- the status must be one we understand -----------------------------
     try:
         mapped = payment_state.map_provider_status(provider_code, parsed.get("status"))
     except KeyError as exc:
         return _reject(event, str(exc)[:255])
+
+    # --- it must not be stale --------------------------------------------
+    # Except a success. A signed "paid" is evidence we hold the customer's
+    # money however late it arrives; dropping it charges them for nothing.
+    event_at = parsed.get("event_at")
+    max_age_hours = int(getattr(settings, "PAYMENT_WEBHOOK_MAX_AGE_HOURS", 72))
+    if (
+        mapped != PaymentStatus.CAPTURED
+        and event_at is not None
+        and event_at < timezone.now() - timedelta(hours=max_age_hours)
+    ):
+        return _reject(event, f"Event is older than {max_age_hours}h; not applied.")
+
+    # --- a second success on a payment already paid -----------------------
+    # A different transaction id saying "paid" again means the customer was
+    # charged twice (two tabs on one checkout). Not the same payment arriving
+    # twice — that has the same id and stopped at the duplicate check above.
+    transaction_reference = str(parsed.get("provider_reference") or "")[:150]
+    if mapped == PaymentStatus.CAPTURED and payment.status not in payment_state.IN_FLIGHT | payment_state.LATE_CAPTURE_FROM:
+        captured_reference = payment.metadata.get("captured_transaction") or payment.provider_reference
+        if transaction_reference and captured_reference and transaction_reference != captured_reference:
+            duplicates = [*payment.metadata.get("duplicate_charges", []), transaction_reference]
+            payment.metadata = {**payment.metadata, "duplicate_charges": duplicates}
+            payment.save(update_fields=["metadata"])
+            _flag_for_refund(payment, f"Charged a second time (transaction {transaction_reference}).")
+            return _reject(
+                event,
+                f"Second successful charge {transaction_reference} on a paid payment; refund it at the gateway.",
+                http_status=409,
+            )
 
     if mapped is None:
         # A real event that carries no state change — an order-created
@@ -715,7 +909,7 @@ def process_webhook(*, provider_code: str, headers: dict, body: bytes, query_par
     # `captured` that superseded it. The state machine already forbids the
     # illegal move; catching it here turns that into a recorded rejection
     # instead of a 500 and a provider that retries forever.
-    if not payment_state.can_transition(payment.status, mapped) and payment.status != mapped:
+    if not payment_state.can_gateway_transition(payment.status, mapped) and payment.status != mapped:
         return _reject(
             event,
             f"Out-of-order event: cannot move payment from '{payment.status}' to '{mapped}'.",
@@ -725,6 +919,7 @@ def process_webhook(*, provider_code: str, headers: dict, body: bytes, query_par
         payment,
         mapped,
         reason=str(parsed.get("failure_reason") or "")[:500],
+        transaction_reference=transaction_reference,
     )
 
     event.processed = True
@@ -763,7 +958,6 @@ def _match_payment(provider_code: str, parsed: dict):
 # ---------------------------------------------------------------------------
 
 
-@transaction.atomic
 def create_refund(
     *, payment: Payment, amount, reason: str = "", destination=None, idempotency_key: str = "", actor=None
 ) -> Refund:
@@ -775,13 +969,34 @@ def create_refund(
     is written before the gateway is called for the same reason a Payment is:
     if the call times out, a refund may well have happened, and a row is what
     lets somebody find out.
+
+    The work is committed before any error is raised. Raising inside the
+    transaction used to roll the Refund row back with it, so a refund that
+    timed out after Paymob had paid it left no trace, the payment went back to
+    "captured", and the next click paid the customer a second time.
     """
+    refund, error = _create_refund(
+        payment=payment, amount=amount, reason=reason, destination=destination,
+        idempotency_key=idempotency_key, actor=actor,
+    )
+    if error is not None:
+        raise error
+    return refund
+
+
+@transaction.atomic
+def _create_refund(*, payment, amount, reason, destination, idempotency_key, actor):
     payment = Payment.objects.select_for_update().get(pk=payment.pk)
 
     if idempotency_key:
-        existing = Refund.objects.filter(idempotency_key=idempotency_key).first()
+        # A failed attempt does not hold the key: retrying it is the point.
+        existing = (
+            Refund.objects.filter(idempotency_key=idempotency_key)
+            .exclude(status=RefundStatus.FAILED)
+            .first()
+        )
         if existing:
-            return existing
+            return existing, None
 
     # Refusing to refund an uncaptured payment is the whole point of the state
     # check: before this, a pending COD order could be "refunded" cash that had
@@ -833,20 +1048,24 @@ def create_refund(
     try:
         provider = get_payment_provider(payment.provider)
         result = provider.refund(payment=payment, amount=amount, reason=reason)
-    except (NotImplementedError, GatewayError) as exc:
-        message = getattr(exc, "message", str(exc))
-        refund.status = RefundStatus.FAILED
-        refund.save(update_fields=["status"])
-        # The money never moved, so the payment goes back to holding it.
-        _set_status(payment, PaymentStatus.CAPTURED if already_refunded.amount == 0 else PaymentStatus.PARTIALLY_REFUNDED)
-        PaymentTransaction.objects.create(
-            payment=payment,
-            transaction_type=PaymentTransactionType.REFUND,
-            amount=amount,
-            success=False,
-            raw_response={"error": message[:500]},
-        )
-        raise ApplicationError(ErrorCodes.PAYMENT_PROVIDER_ERROR, message) from exc
+    except GatewayError as exc:
+        if not exc.status_code:
+            # Sent, and no answer: the gateway may well have refunded. Leave it
+            # pending — which blocks any other refund on this payment — until
+            # reconciliation reads the gateway's refunded total.
+            logger.error("payment %s: refund %s outcome unknown: %s", payment.id, refund.id, exc.detail)
+            PaymentTransaction.objects.create(
+                payment=payment,
+                transaction_type=PaymentTransactionType.REFUND,
+                amount=amount,
+                success=False,
+                raw_response={"error": exc.message[:500], "outcome": "unknown"},
+            )
+            _record_refund_audit(payment, refund, amount, reason, note, actor)
+            return refund, None
+        return refund, _refund_refused(payment, refund, amount, already_refunded, exc.message, exc)
+    except NotImplementedError as exc:
+        return refund, _refund_refused(payment, refund, amount, already_refunded, str(exc), exc)
 
     if result.success:
         refund.status = RefundStatus.PROCESSED
@@ -859,6 +1078,9 @@ def create_refund(
             if total_refunded >= payment.amount
             else PaymentStatus.PARTIALLY_REFUNDED,
         )
+        if payment.status == PaymentStatus.REFUNDED and payment.metadata.get("needs_refund"):
+            payment.metadata = {**payment.metadata, "needs_refund": False}
+            payment.save(update_fields=["metadata"])
     else:
         refund.status = RefundStatus.FAILED
         _set_status(
@@ -892,6 +1114,28 @@ def create_refund(
             user_id=payment.order.user_id,
         )
 
+    _record_refund_audit(payment, refund, amount, reason, note, actor)
+    return refund, None
+
+
+def _refund_refused(payment, refund, amount, already_refunded, message, exc):
+    """The gateway said no. The money never moved, so the payment goes back to holding it."""
+    refund.status = RefundStatus.FAILED
+    refund.save(update_fields=["status"])
+    _set_status(payment, PaymentStatus.CAPTURED if already_refunded.amount == 0 else PaymentStatus.PARTIALLY_REFUNDED)
+    PaymentTransaction.objects.create(
+        payment=payment,
+        transaction_type=PaymentTransactionType.REFUND,
+        amount=amount,
+        success=False,
+        raw_response={"error": (message or "")[:500]},
+    )
+    error = ApplicationError(ErrorCodes.PAYMENT_PROVIDER_ERROR, message)
+    error.__cause__ = exc
+    return error
+
+
+def _record_refund_audit(payment, refund, amount, reason, note, actor):
     from apps.audit.models import AuditAction
     from apps.audit.services import record
 
@@ -908,4 +1152,45 @@ def create_refund(
             "manual": bool(note),
         },
     )
-    return refund
+
+
+# ---------------------------------------------------------------------------
+# Cancelling an order that has an online payment
+# ---------------------------------------------------------------------------
+
+
+def assert_customer_may_cancel(order) -> None:
+    """
+    Refuse a customer's cancellation while their money may be moving.
+
+    The double charge this stops: a wallet confirmation is slow, the customer
+    cancels and orders again, pays again — and then the first payment lands.
+    So the gateway is asked first. Still unanswered, the order stays. Paid, the
+    order is confirmed, and cancelling it means a refund, which a person does.
+    Cash on delivery and InstaPay have nothing in flight and are unaffected.
+    """
+    for payment in order.payments.filter(status__in=payment_state.IN_FLIGHT):
+        if not _is_gateway(payment.provider):
+            continue
+        try:
+            reconcile_payment(payment)
+        except ApplicationError as exc:
+            logger.warning("payment %s: could not ask before cancel: %s", payment.id, exc)
+
+    payments = list(order.payments.all())
+    if any(p.status in payment_state.IN_FLIGHT and _is_gateway(p.provider) for p in payments):
+        raise ApplicationError(
+            ErrorCodes.ORDER_CANNOT_CANCEL,
+            "Your payment is still being confirmed. Please wait a few minutes before cancelling.",
+        )
+    if any(p.status in payment_state.SETTLED and _is_gateway(p.provider) for p in payments):
+        raise ApplicationError(
+            ErrorCodes.ORDER_CANNOT_CANCEL,
+            "This order is already paid. Contact us to cancel it and get your money back.",
+        )
+
+
+def flag_paid_cancellation(order) -> None:
+    for payment in order.payments.filter(status__in=payment_state.SETTLED):
+        if _is_gateway(payment.provider) and not payment.metadata.get("needs_refund"):
+            _flag_for_refund(payment, "Order cancelled after it was paid.")

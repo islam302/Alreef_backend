@@ -40,10 +40,38 @@ def tax_rate_for_product(product) -> Decimal:
     return Decimal("0")
 
 
-def calculate_totals(*, cart, address, shipping_method_id, payment_method: str, coupon_code: str = "") -> CheckoutTotals:
+def _refresh_cart_lines(items):
+    """
+    Hold every line to what the store sells *today*.
+
+    A cart line remembers the price it was added at, and nothing re-read it
+    before checkout. So a customer who carted an item during a sale — or while
+    a pricing mistake was live — could keep that price indefinitely, and an item
+    staff had withdrawn (variant disabled, product unpublished or archived) could
+    still be bought from a cart that already held it.
+    """
+    from apps.catalog.models import ProductStatus
+
+    for item in items:
+        variant = item.variant
+        product = variant.product
+        if not variant.is_active or not product.published or product.status != ProductStatus.ACTIVE:
+            raise ApplicationError(
+                ErrorCodes.VARIANT_NOT_FOUND,
+                f"'{product.name_en}' is no longer available. Please remove it from your cart.",
+            )
+        if item.unit_price_snapshot != variant.price:
+            item.unit_price_snapshot = variant.price
+            item.save(update_fields=["unit_price_snapshot"])
+
+
+def calculate_totals(
+    *, cart, address, shipping_method_id, payment_method: str, coupon_code: str = "", user=None,
+) -> CheckoutTotals:
     items = list(cart.items.select_related("variant__product").all())
     if not items:
         raise ApplicationError(ErrorCodes.CART_EMPTY, "Cart is empty.")
+    _refresh_cart_lines(items)
 
     currency = cart.currency
     subtotal = sum((i.line_total for i in items), start=Money(0, currency))
@@ -54,9 +82,14 @@ def calculate_totals(*, cart, address, shipping_method_id, payment_method: str, 
 
     coupon_discount = Money(0, currency)
     if coupon_code:
-        from apps.coupons.services import compute_discount, get_valid_coupon
+        from apps.coupons.services import compute_discount, validate_coupon_for_cart
 
-        coupon = get_valid_coupon(coupon_code)
+        # The full cart check, not just "does this code exist": the code comes
+        # from the request body here, so the per-user limit, the minimum order
+        # and the coupon's scope have to be enforced here too — otherwise the
+        # cart's coupon endpoint is the only place they apply, and checkout
+        # never asks it.
+        coupon = validate_coupon_for_cart(code=coupon_code, cart=cart, user=user)
         coupon_discount = compute_discount(coupon=coupon, items=items, subtotal=subtotal)
         if coupon.discount_type == "free_shipping":
             promo_free_shipping = True
@@ -172,9 +205,21 @@ def create_order_from_cart(
     items = list(cart.items.select_related("variant__product").all())
     if not items:
         raise ApplicationError(ErrorCodes.CART_EMPTY, "Cart is empty.")
+    _refresh_cart_lines(items)
+
+    if coupon_code:
+        # Serialise checkouts spending the same coupon. Its limits are counted
+        # from CouponUsage rows, and two checkouts that both read the count
+        # before either wrote one each saw room for themselves — a single-use
+        # code spent twice. Held until this transaction commits, so the second
+        # checkout reads the first one's usage.
+        from apps.coupons.models import Coupon
+
+        Coupon.objects.select_for_update().filter(code__iexact=coupon_code).first()
 
     totals = calculate_totals(
-        cart=cart, address=address, shipping_method_id=shipping_method_id, payment_method=payment_method, coupon_code=coupon_code,
+        cart=cart, address=address, shipping_method_id=shipping_method_id, payment_method=payment_method,
+        coupon_code=coupon_code, user=user,
     )
 
     shipping_method = ShippingMethod.objects.filter(pk=shipping_method_id).first() if shipping_method_id else None

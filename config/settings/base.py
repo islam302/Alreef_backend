@@ -373,6 +373,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.payments.tasks.reconcile_pending_payments_task",
         "schedule": 900.0,  # every 15 minutes
     },
+    "release-unpaid-orders": {
+        # Online orders nobody paid for give their stock back after a day.
+        "task": "apps.payments.tasks.release_unpaid_orders_task",
+        "schedule": 3600.0,  # hourly
+    },
     "expire-stale-payments": {
         # Closes out abandoned checkouts so the dashboard's "needs chasing"
         # filter shows cases that need chasing rather than months of them.

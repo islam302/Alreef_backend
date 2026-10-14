@@ -87,8 +87,31 @@ PAYMENT_STATUS_TRANSITIONS = {
 }
 
 
+#: Unsettled states. While a payment sits in one of these the gateway may still
+#: take the money, so nothing may start a second attempt at it.
+IN_FLIGHT = frozenset({PaymentStatus.PENDING, PaymentStatus.REQUIRES_ACTION, PaymentStatus.AUTHORIZED})
+
+#: Gave-up states the gateway can still overrule with a success.
+#:
+#: Paymob lets a customer retry on the same checkout page: the declined card
+#: fails the payment, the next card succeeds minutes later. A success can also
+#: land after we expired the payment, or after the order was cancelled while the
+#: callback was delayed. In every case the money is ours, and refusing to record
+#: it charges the customer for an order we never confirm. Only a verified
+#: gateway statement (signed webhook or server-side inquiry) may make this move;
+#: see `can_gateway_transition`.
+LATE_CAPTURE_FROM = frozenset({PaymentStatus.FAILED, PaymentStatus.EXPIRED, PaymentStatus.CANCELLED})
+
+
 def can_transition(current: str, new: str) -> bool:
     return new in PAYMENT_STATUS_TRANSITIONS.get(current, set())
+
+
+def can_gateway_transition(current: str, new: str) -> bool:
+    """`can_transition`, plus the one move only the gateway's own word allows."""
+    if can_transition(current, new):
+        return True
+    return new == PaymentStatus.CAPTURED and current in LATE_CAPTURE_FROM
 
 
 def assert_transition(current: str, new: str) -> None:

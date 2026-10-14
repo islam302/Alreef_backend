@@ -1,3 +1,6 @@
+from decimal import Decimal, InvalidOperation
+
+from django.conf import settings
 from djmoney.money import Money
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import permissions
@@ -76,7 +79,17 @@ class ShippingQuoteView(APIView):
         currency = request.query_params.get("currency", "EGP")
         weight_kg = request.query_params.get("weight_kg")
 
-        subtotal = Money(subtotal_raw, currency)
+        # Parsed here rather than handed straight to Money: "abc", "NaN" or an
+        # exponent no Decimal context can hold used to escape as a 500.
+        try:
+            amount = Decimal(subtotal_raw)
+        except (InvalidOperation, TypeError, ValueError):
+            amount = None
+        if amount is None or not amount.is_finite() or amount < 0 or amount > Decimal("1e9"):
+            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, "subtotal must be a non-negative amount.")
+        if currency not in settings.CURRENCIES:
+            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, "Unsupported currency.")
+        subtotal = Money(amount, currency)
         quotes = get_available_quotes(governorate=governorate, subtotal=subtotal, weight_kg=weight_kg)
         return success_response(ShippingQuoteSerializer(quotes, many=True).data)
 

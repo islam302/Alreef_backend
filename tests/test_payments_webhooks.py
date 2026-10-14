@@ -344,13 +344,14 @@ def test_a_stale_event_is_recorded_but_not_applied(
 ):
     """
     Providers retry for a long time. An event describing a state we moved on from
-    weeks ago must not be replayed onto a live payment.
+    weeks ago must not be replayed onto a live payment. (A *success* is the
+    exception — it is applied however late; see test_payments_resilience.)
     """
     settings.PAYMENT_WEBHOOK_MAX_AGE_HOURS = 24
     payment = gateway_payment(provider="paymob", method="card", status=PaymentStatus.REQUIRES_ACTION)
     old = (timezone.now() - timedelta(days=5)).isoformat()
 
-    response = post_paymob(api_client, paymob_transaction(payment, created_at=old))
+    response = post_paymob(api_client, paymob_transaction(payment, created_at=old, success=False))
 
     assert response.status_code == 202
     payment.refresh_from_db()

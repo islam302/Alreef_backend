@@ -150,7 +150,13 @@ class ChangePasswordView(APIView):
         serializer.is_valid(raise_exception=True)
         request.user.set_password(serializer.validated_data["new_password"])
         request.user.save(update_fields=["password"])
-        return success_response(message="Password changed.")
+        # Every other session ends with the old password. This one carries on
+        # with the fresh pair returned here.
+        services.revoke_all_sessions(request.user)
+        refresh = RefreshToken.for_user(request.user)
+        return success_response(
+            {"refresh": str(refresh), "access": str(refresh.access_token)}, message="Password changed.",
+        )
 
 
 @extend_schema(
@@ -241,9 +247,19 @@ class PhoneVerifyRequestView(APIView):
     def post(self, request):
         serializer = PhoneVerifyRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        phone = serializer.validated_data.get("phone") or str(request.user.phone or "")
+        # The code confirms the number on the account, so it may only ever be
+        # sent to that number. Sending it wherever the body said let a customer
+        # receive the code on their own phone and mark a number they do not
+        # control — the one on file — as verified.
+        phone = str(request.user.phone or "")
         if not phone:
-            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, "No phone number on file. Provide one.")
+            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, "No phone number on file. Add one to your profile first.")
+        supplied = serializer.validated_data.get("phone")
+        if supplied and supplied != phone:
+            raise ApplicationError(
+                ErrorCodes.VALIDATION_ERROR,
+                "That is not the phone number on your account. Update your profile first.",
+            )
         code = services.issue_phone_otp(request.user)
         send_sms_task.delay(to=phone, message=f"Your verification code is {code}", event="phone_verification", user_id=request.user.id)
         return success_response(message="OTP sent.")

@@ -41,6 +41,10 @@ class MeSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         profile_data = validated_data.pop("profile", None)
+        # A verification belongs to a number, not to the account: a new number
+        # starts unverified.
+        if "phone" in validated_data and validated_data["phone"] != instance.phone:
+            instance.phone_verified = False
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -143,7 +147,12 @@ class EmailVerifyConfirmSerializer(serializers.Serializer):
 
 
 class PhoneVerifyRequestSerializer(serializers.Serializer):
-    phone = serializers.CharField(required=False)
+    # Normalised to E.164 so it compares equal to the number on file however
+    # the customer typed it.
+    phone = PhoneNumberField(required=False, allow_null=True)
+
+    def validate_phone(self, value):
+        return str(value) if value else ""
 
 
 class PhoneVerifyConfirmSerializer(serializers.Serializer):

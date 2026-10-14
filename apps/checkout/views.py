@@ -38,7 +38,7 @@ class CheckoutSummaryView(APIView):
         address = _get_address(request.user, data["address_id"])
         totals = calculate_totals(
             cart=cart, address=address, shipping_method_id=data["shipping_method_id"],
-            payment_method=data["payment_method"], coupon_code=data.get("coupon_code", ""),
+            payment_method=data["payment_method"], coupon_code=data.get("coupon_code", ""), user=request.user,
         )
         return success_response(CheckoutTotalsSerializer(totals).data)
 

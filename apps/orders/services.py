@@ -132,11 +132,49 @@ def cancel_order(order: Order, *, reason: str, cancelled_by=None) -> Order:
 
     for reservation in StockReservation.objects.filter(order=order, status=StockReservationStatus.ACTIVE):
         release_reservation(reservation)
+    _restock_consumed(order)
 
     order = transition_status(order, OrderStatus.CANCELLED, changed_by=cancelled_by, note=reason)
     order.cancel_reason = reason
     order.save(update_fields=["cancel_reason"])
+
+    # Money already taken online stays taken until someone refunds it. Say so on
+    # the payment, where the refund button is, instead of leaving it to memory.
+    from apps.payments.services import flag_paid_cancellation
+
+    flag_paid_cancellation(order)
     return order
+
+
+def _restock_consumed(order: Order) -> None:
+    """
+    Put back what a confirmed order had already taken from the shelf.
+
+    Confirmation consumes the reservation (the units leave their batch), and
+    every COD order is confirmed at checkout, so releasing only *active*
+    reservations on cancel lost the stock of every cancelled confirmed order.
+    The units go back into the batch they came from, so expiry dates stay true.
+    Runs once per order: an order can only be cancelled once.
+    """
+    from apps.inventory.models import (
+        Batch,
+        InventoryMovement,
+        InventoryMovementType,
+        StockReservation,
+        StockReservationStatus,
+    )
+
+    consumed = StockReservation.objects.filter(
+        order=order, status=StockReservationStatus.CONSUMED, batch__isnull=False
+    )
+    for reservation in consumed:
+        batch = Batch.objects.select_for_update().get(pk=reservation.batch_id)
+        batch.quantity += reservation.quantity
+        batch.save(update_fields=["quantity"])
+        InventoryMovement.objects.create(
+            item=reservation.item, batch=batch, movement_type=InventoryMovementType.RETURN,
+            quantity_delta=reservation.quantity, reference=str(order.order_number),
+        )
 
 
 def _collect_cash_on_delivery(order: Order, *, collected_by=None):

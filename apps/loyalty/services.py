@@ -62,7 +62,10 @@ def redeem_points(*, user, points: int):
             f"Minimum redeemable is {settings_row.minimum_redeemable_points} points.",
         )
 
-    account = LoyaltyAccount.objects.select_for_update().get(user=user)
+    # get_or_create first: a customer who never earned a point has no row yet,
+    # and a bare .get() turned their redeem attempt into a 500.
+    account = get_or_create_account(user)
+    account = LoyaltyAccount.objects.select_for_update().get(pk=account.pk)
     if account.points_balance < points:
         raise ApplicationError(ErrorCodes.LOYALTY_INSUFFICIENT_POINTS, "Not enough points.")
 

@@ -31,6 +31,14 @@ def add_item(cart: Cart, *, variant_id, quantity: int) -> CartItem:
         cart=cart, variant=variant, defaults={"quantity": quantity, "unit_price_snapshot": variant.price}
     )
     if not created:
+        # The serializer caps each request, not the line: without this, three
+        # adds of the maximum built a line three times over the ceiling.
+        if item.quantity + quantity > settings.MAX_CART_ITEM_QUANTITY:
+            raise ApplicationError(
+                ErrorCodes.VALIDATION_ERROR,
+                f"At most {settings.MAX_CART_ITEM_QUANTITY} of the same item per order. "
+                f"Please contact us for a larger quantity.",
+            )
         item.quantity += quantity
         item.unit_price_snapshot = variant.price
         item.save(update_fields=["quantity", "unit_price_snapshot"])
@@ -83,7 +91,7 @@ def merge_guest_cart_into_user(*, guest_cart: Cart, user) -> Cart:
     for guest_item in guest_cart.items.select_related("variant").all():
         existing = user_cart.items.filter(variant=guest_item.variant).first()
         if existing:
-            existing.quantity += guest_item.quantity
+            existing.quantity = min(existing.quantity + guest_item.quantity, settings.MAX_CART_ITEM_QUANTITY)
             existing.unit_price_snapshot = guest_item.variant.price
             existing.save(update_fields=["quantity", "unit_price_snapshot"])
         else:

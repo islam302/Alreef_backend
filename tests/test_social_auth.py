@@ -120,7 +120,9 @@ def test_verified_email_links_the_existing_account(api_client, social_settings, 
     assert response.json()["data"]["user"]["id"] == user.id
     assert User.objects.count() == 1
     user.refresh_from_db()
-    assert user.email_verified and user.check_password("SuperSecret123")
+    # The account was never verified, so its password was never proven to be
+    # the owner's: linking retires it (see test_pentest_api, pre-account hijack).
+    assert user.email_verified and not user.has_usable_password()
 
 
 def test_second_sign_in_finds_the_account_by_provider_id(api_client, social_settings):

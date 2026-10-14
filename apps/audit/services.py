@@ -3,7 +3,7 @@ def record(*, actor=None, action: str, model_name: str = "", object_id="", chang
 
     ip_address, path, method = None, "", ""
     if request is not None:
-        ip_address = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip() or request.META.get("REMOTE_ADDR")
+        ip_address = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[-1].strip() or request.META.get("REMOTE_ADDR")
         path = request.path
         method = request.method
 

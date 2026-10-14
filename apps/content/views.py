@@ -28,7 +28,7 @@ from apps.core.response import success_response
 
 def client_ip(request):
     return (
-        request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
+        request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[-1].strip()
         or request.META.get("REMOTE_ADDR")
     )
 

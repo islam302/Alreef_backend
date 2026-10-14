@@ -54,6 +54,10 @@ class OrderCancelView(APIView):
             raise ApplicationError(ErrorCodes.ORDER_NOT_FOUND, "Order not found.")
         serializer = OrderCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        from apps.payments.services import assert_customer_may_cancel
+
+        assert_customer_may_cancel(order)
         order = services.cancel_order(order, reason=serializer.validated_data["reason"], cancelled_by=request.user)
         return success_response(OrderDetailSerializer(order).data, message="Order cancelled.")
 

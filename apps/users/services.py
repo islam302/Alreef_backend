@@ -82,6 +82,23 @@ def confirm_email_verification_token(token: str):
     return user
 
 
+def revoke_all_sessions(user) -> None:
+    """
+    Blacklist every refresh token this account has been issued.
+
+    A new password has to end the sessions the old one opened. Without this, a
+    refresh token taken from a customer — the very situation that sends them to
+    reset their password — kept minting access tokens for its full 14 days
+    after the reset. Access tokens already out live at most ACCESS_TOKEN_LIFETIME.
+    """
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+    outstanding = OutstandingToken.objects.filter(user=user, blacklistedtoken__isnull=True)
+    BlacklistedToken.objects.bulk_create(
+        [BlacklistedToken(token=token) for token in outstanding], ignore_conflicts=True
+    )
+
+
 def issue_password_reset_token(user) -> str:
     token = _generate_token()
     PasswordResetToken.objects.create(user=user, token=token, expires_at=timezone.now() + PASSWORD_RESET_TTL)
@@ -103,6 +120,7 @@ def confirm_password_reset(token: str, new_password: str):
     user = record.user
     user.set_password(new_password)
     user.save(update_fields=["password"])
+    revoke_all_sessions(user)
     return user
 
 

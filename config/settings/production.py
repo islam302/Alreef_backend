@@ -142,3 +142,10 @@ if config("USE_S3", default=False, cast=bool):
     AWS_S3_CUSTOM_DOMAIN = config("AWS_S3_CUSTOM_DOMAIN", default="")
     AWS_DEFAULT_ACL = None
     AWS_S3_FILE_OVERWRITE = False
+
+# Exactly one proxy hop that rewrites X-Forwarded-For sits in front of the API:
+# the edge nginx, which sets it to the real client address (deploy/nginx). Telling
+# DRF so makes throttling key on that address alone; left unset, DRF keyed on the
+# whole header string, and a client could invent a new value per request to
+# escape the login and coupon rate limits.
+REST_FRAMEWORK["NUM_PROXIES"] = 1  # noqa: F405
