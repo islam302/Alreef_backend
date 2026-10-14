@@ -432,3 +432,14 @@ def test_staff_cancelling_a_paid_order_flags_the_refund(monkeypatch, gateways_en
     payment.refresh_from_db()
     assert payment.status == PaymentStatus.REFUNDED
     assert payment.metadata.get("needs_refund") is False
+
+
+def test_staff_see_which_payments_need_a_refund(staff_client, api_client, gateways_enabled, gateway_payment):
+    payment = gateway_payment(provider="paymob", method="card", status=PaymentStatus.REQUIRES_ACTION)
+    post_paymob(api_client, paymob_transaction(payment, id=1401))
+    post_paymob(api_client, paymob_transaction(payment, id=1402))
+
+    data = staff_client.get(f"/api/v1/admin-api/payments/{payment.pk}/").json()["data"]
+
+    assert data["metadata"]["needs_refund"] is True
+    assert data["metadata"]["duplicate_charges"] == ["1402"]

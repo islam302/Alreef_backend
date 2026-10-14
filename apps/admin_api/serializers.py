@@ -73,6 +73,12 @@ SAFE_PAYMENT_METADATA_KEYS = (
     "integration_id",
     "instructions_ar",
     "collect_amount",
+    # Money we hold but owe back (paid after a cancel, or charged twice), and
+    # the extra gateway transactions behind it. Shown so staff refund it.
+    "needs_refund",
+    "needs_refund_reason",
+    "duplicate_charges",
+    "captured_transaction",
     "currency",
     "live",
     "expires_at",
