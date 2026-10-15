@@ -666,3 +666,28 @@ def test_delivery_does_not_capture_an_instapay_payment(
 
     payment.refresh_from_db()
     assert payment.status == PaymentStatus.REQUIRES_ACTION
+
+
+def test_a_transfer_that_arrived_is_recorded_after_instapay_is_switched_off(
+    settings, authenticated_client, product_with_variant_and_stock, address, shipping_setup
+):
+    """Switching InstaPay off must not strand transfers customers already made."""
+    from apps.payments.services import record_manual_receipt
+
+    _instapay_enabled(settings)
+    response = _checkout(
+        authenticated_client,
+        product_with_variant_and_stock["variant"],
+        address,
+        shipping_setup,
+        method="instapay",
+    )
+    payment = Payment.objects.get(pk=response.json()["data"]["payment"]["id"])
+    settings.PAYMENT_PROVIDERS = payment_providers_with(
+        INSTAPAY={**INSTAPAY_TEST_CONFIG, "ENABLED": False}
+    )
+
+    record_manual_receipt(payment, note="seen in the InstaPay app")
+
+    payment.refresh_from_db()
+    assert payment.status == PaymentStatus.CAPTURED

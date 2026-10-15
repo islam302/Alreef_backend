@@ -18,7 +18,6 @@ confirmation) against real PostgreSQL and Redis.
 - [Seed data](#seed-data)
 - [Authentication](#authentication)
 - [API documentation](#api-documentation)
-- [Postman](#postman)
 - [Frontend integration](#frontend-integration)
 - [Payments](#payments)
 - [Shipping](#shipping)
@@ -172,14 +171,6 @@ logout) documented in `docs/api/authentication.md` and
 - **Architecture docs:** `docs/architecture/*.md`
 - **Payment provider notes:** `docs/payments/*.md`
 - **Deployment docs:** `docs/deployment/*.md`
-
-## Postman
-
-`postman/Egypt-Ecommerce.postman_collection.json` +
-`postman/Egypt-Ecommerce.postman_environment.json` — see `postman/README.md`
-for import steps and the recommended run order (login → browse → address →
-cart → checkout, with IDs auto-captured into environment variables by test
-scripts).
 
 ## Frontend integration
 

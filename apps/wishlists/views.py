@@ -1,6 +1,7 @@
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions
 from rest_framework.generics import ListAPIView
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.catalog.models import Product
@@ -45,7 +46,9 @@ class WishlistRemoveView(APIView):
         deleted, _ = WishlistItem.objects.filter(user=request.user, product_id=product_id).delete()
         if not deleted:
             raise ApplicationError(ErrorCodes.NOT_FOUND, "Item not in wishlist.")
-        return success_response(message="Removed from wishlist.", status=204)
+        # A 204 carries no body; sending one breaks proxies that read the next
+        # response off the same connection.
+        return Response(status=204)
 
 
 @extend_schema(tags=["Wishlist"], responses=envelope(name="WishlistCheck"))

@@ -84,6 +84,7 @@ def create_order_with_unique_number(**fields) -> Order:
             logger.warning("order number collision outside the sequence, retrying (%s)", attempt + 1)
 
 
+@transaction.atomic
 def transition_status(order: Order, new_status: str, *, changed_by=None, note: str = "") -> Order:
     order = Order.objects.select_for_update().get(pk=order.pk)
     if not order.can_transition_to(new_status):
@@ -306,6 +307,11 @@ def create_return_request(*, order: Order, user, reason: str, description: str, 
 
 @transaction.atomic
 def decide_return_request(*, return_request: ReturnRequest, approve: bool, decided_by, note: str = ""):
+    if return_request.status != ReturnRequestStatus.REQUESTED:
+        raise ApplicationError(
+            ErrorCodes.ORDER_INVALID_TRANSITION,
+            f"This return is already {return_request.status} and cannot be decided again.",
+        )
     return_request.status = ReturnRequestStatus.APPROVED if approve else ReturnRequestStatus.REJECTED
     return_request.resolution_note = note
     return_request.save(update_fields=["status", "resolution_note"])
@@ -319,6 +325,14 @@ def decide_return_request(*, return_request: ReturnRequest, approve: bool, decid
 def complete_return_and_refund(*, return_request: ReturnRequest, processed_by, destination="original_method"):
     from apps.payments.services import create_refund
 
+    # Only an approved return is refunded. The dashboard hides the button
+    # otherwise, but the server must not rely on that: completing a rejected
+    # return while a later one is open used to refund the rejected items.
+    if return_request.status != ReturnRequestStatus.APPROVED:
+        raise ApplicationError(
+            ErrorCodes.ORDER_INVALID_TRANSITION,
+            f"Only an approved return can be completed; this one is {return_request.status}.",
+        )
     order = return_request.order
     return_request.status = ReturnRequestStatus.ITEM_RECEIVED
     return_request.save(update_fields=["status"])

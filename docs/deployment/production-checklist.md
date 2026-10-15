@@ -269,34 +269,27 @@ For a manually-settled method (COD, InstaPay) additionally:
 
 ## 10. Backups
 
-There are now scripts for this in the umbrella repository. They are the
-mechanism, not the plan: read what each one deliberately does *not* do.
+The scripts live in the umbrella repository, `deploy/server/` (see its README).
 
-- [ ] Schedule `scripts/backup.sh` on the host (not inside a container). It
-  dumps the database with `pg_dump -Fc`, tars the media volume, writes a
-  `MANIFEST.txt` recording the commit and submodule pins the data belongs to,
-  and prunes anything older than `KEEP_DAYS` (default 14). It fails loudly if
-  the dump comes back implausibly small, because a zero-byte dump with a zero
-  exit code is the worst possible outcome.
-
-      17 3 * * *  cd /srv/alreef && BACKUP_DIR=/mnt/backups ./scripts/backup.sh                     >> /var/log/alreef-backup.log 2>&1
-
-- [ ] **Send `BACKUP_DIR` off this host.** A backup on the same disk as the
-  database protects you from a bad migration, not from losing the machine.
-  Object storage, another server — anything with a different failure mode.
+- [ ] Schedule `deploy/server/backup.sh` on the host (cron, 03:00). It dumps the
+  database, tars the media, refuses a dump with no data in it, keeps 14 days,
+  and emails `OPS_ALERT_EMAIL` when anything fails.
+- [ ] **Send the backups off this host.** A backup on the same disk as the
+  database protects you from a bad migration, not from losing the machine. Set
+  `OFFSITE_REMOTE` and the `RCLONE_CONFIG_*` lines in `.env` (Cloudflare R2
+  steps in `deploy/server/README.md`); the copies are encrypted with
+  `BACKUP_PASSPHRASE`, which must also be kept somewhere else.
 - [ ] **Rehearse the restore, and write down how long it took.**
 
-      ./scripts/restore.sh ./backups/<timestamp> --into-scratch-db
+      deploy/server/restore.sh --check /srv/backups/alreef/db-<stamp>.sql.gz
 
   This restores into a throwaway database beside the live one, counts orders,
   payments, customers and products, and drops it again. It touches nothing
-  live, so it can run monthly. Until it has passed you have a directory of
-  files, not a backup — and during an outage the only number anyone asks for
-  is how long recovery takes.
-- [ ] Know where the real-emergency path is before you need it:
-  `./scripts/restore.sh <dir> --overwrite-production`, which stops the
-  application, drops and recreates the live database, and demands the word
-  RESTORE typed in full.
+  live, so it can run monthly.
+- [ ] Know the real-emergency path before you need it:
+  `deploy/server/restore.sh --overwrite-production <db file> [<media file>]`,
+  which stops the application, replaces the live database (and media), and
+  demands the word RESTORE typed in full.
 - [ ] The `postgres_data` Docker volume is not a backup strategy.
 - [ ] Back up the `media_volume` (user-uploaded product images, review
   images, profile images) if using local disk storage rather than S3.

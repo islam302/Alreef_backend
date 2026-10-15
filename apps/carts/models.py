@@ -44,6 +44,10 @@ class CartItem(TimeStampedModel):
 
     class Meta:
         unique_together = [("cart", "variant")]
+        # The order lines were added in, always. Without it Postgres hands rows
+        # back in storage order, and an UPDATE moves a row: changing a line's
+        # quantity made it jump to the bottom of the cart under the shopper's thumb.
+        ordering = ["created_at", "id"]
 
     def __str__(self):
         return f"{self.quantity} x {self.variant} in {self.cart_id}"

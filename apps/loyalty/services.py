@@ -82,10 +82,18 @@ def expire_stale_points():
     """Celery Beat: expires points past their `expires_at`."""
     expired = LoyaltyTransaction.objects.filter(
         transaction_type=LoyaltyTransactionType.EARN, expires_at__isnull=False, expires_at__lt=timezone.now(),
-    ).exclude(account__transactions__transaction_type=LoyaltyTransactionType.EXPIRE)
+    )
 
     count = 0
     for txn in expired:
+        # Idempotency is per earning, not per account: excluding every account
+        # that already had one EXPIRE row meant nothing it earned later could
+        # ever expire. The EXPIRE row's note names the earning it closed.
+        if LoyaltyTransaction.objects.filter(
+            account_id=txn.account_id, transaction_type=LoyaltyTransactionType.EXPIRE,
+            note=f"Expired from earn txn {txn.id}",
+        ).exists():
+            continue
         account = LoyaltyAccount.objects.select_for_update().get(pk=txn.account_id)
         if account.points_balance <= 0:
             continue

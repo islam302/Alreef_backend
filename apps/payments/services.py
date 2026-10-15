@@ -439,9 +439,16 @@ def record_manual_receipt(payment: Payment, *, actor=None, note: str = ""):
     payment_state.assert_transition(payment.status, PaymentStatus.CAPTURED)
     wording = _MANUAL_NOTES[payment.provider]
 
-    result = get_payment_provider(payment.provider).capture(payment=payment)
-    if not result.success:
-        raise ApplicationError(ErrorCodes.PAYMENT_FAILED, "Could not record the payment.")
+    try:
+        result = get_payment_provider(payment.provider).capture(payment=payment)
+    except NotImplementedError:
+        # The route was switched off after this payment was made. Nothing is
+        # called for a manual route anyway — the person confirming is the
+        # evidence — so a transfer that did arrive is still recorded.
+        logger.info("payment %s: %s route disabled; recording receipt anyway", payment.id, payment.provider)
+    else:
+        if not result.success:
+            raise ApplicationError(ErrorCodes.PAYMENT_FAILED, "Could not record the payment.")
 
     payment = mark_payment_captured(payment, note=note or wording["received"])
 

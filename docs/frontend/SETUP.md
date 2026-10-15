@@ -164,10 +164,7 @@ Three options, in increasing order of effort:
 **Swagger** (`/api/docs/`) — generated from the live code, so it can't be out of date.
 Click *Authorize* and paste a `Bearer <access>` token to call authenticated endpoints.
 
-**Postman** — `postman/Egypt-Ecommerce.postman_collection.json` plus the environment
-file next to it. Requests chain: run Login and it stores `access_token`, run Products and
-it stores `product_id`, and so on. `postman/README.md` has the recommended run order.
-`Idempotency-Key` is generated automatically per send.
+To try requests by hand, Swagger above is the source of truth; any client that can import OpenAPI (Postman, Insomnia, Bruno) can load `/api/schema/` directly, so a hand-kept collection never drifts from the code.
 
 **curl** — for a quick sanity check that the stack is alive:
 

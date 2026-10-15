@@ -555,7 +555,11 @@ class AdminInventoryViewSet(ReadOnlyEnvelopeViewSet):
         """Everything that needs a human: low stock, out of stock, expiry."""
         items = list(self.get_queryset())
         today = timezone.now().date()
-        horizon = today + timedelta(days=int(request.query_params.get("expiry_days", 30) or 30))
+        try:
+            expiry_days = int(request.query_params.get("expiry_days", 30) or 30)
+        except (TypeError, ValueError):
+            expiry_days = 30
+        horizon = today + timedelta(days=max(0, min(expiry_days, 3650)))
         expiring = (
             Batch.objects.filter(
                 is_active=True, quantity__gt=0,

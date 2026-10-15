@@ -143,3 +143,40 @@ def test_apply_expired_coupon(authenticated_client, product_with_variant_and_sto
 
     assert response.status_code == 400
     assert response.json()["errors"]["code"] == ErrorCodes.COUPON_EXPIRED
+
+
+def test_cart_lines_come_back_in_the_order_they_were_added(api_client, product_with_variant_and_stock):
+    """
+    A line the shopper just changed must stay where it was on screen.
+
+    Postgres returns rows in storage order unless asked otherwise, and an UPDATE
+    moves a row, so the API must sort by when the line was added. Simulated here
+    by making storage order and creation order disagree.
+    """
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.carts.models import CartItem
+    from apps.catalog.models import ProductVariant
+    from apps.inventory.services import get_or_create_item
+
+    first = product_with_variant_and_stock["variant"]
+    second = ProductVariant.objects.create(
+        product=first.product, sku="HONEY-SIDR-001-1KG", name_suffix="1kg", price=Decimal("450.00"), is_active=True,
+    )
+    get_or_create_item(second)
+    api_client.post("/api/v1/cart/items/", {"variant_id": second.id, "quantity": 1}, format="json")
+    api_client.post("/api/v1/cart/items/", {"variant_id": first.id, "quantity": 1}, format="json")
+    # Make "added" order first-then-second while storage order is not: the
+    # UPDATE itself moves `first`'s row to the end of the table, which is the
+    # very effect being guarded against.
+    CartItem.objects.filter(variant=first).update(created_at=timezone.now() - timedelta(minutes=1))
+
+    items = api_client.get("/api/v1/cart/").json()["data"]["items"]
+    assert [i["variant"]["id"] for i in items] == [first.id, second.id]
+
+    api_client.patch(f"/api/v1/cart/items/{items[0]['id']}/", {"quantity": 2}, format="json")
+    items = api_client.get("/api/v1/cart/").json()["data"]["items"]
+    assert [i["variant"]["id"] for i in items] == [first.id, second.id]
