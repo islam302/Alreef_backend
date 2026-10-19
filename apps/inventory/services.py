@@ -84,33 +84,48 @@ def reserve_stock(*, variant, quantity: int, cart_id=None, order=None, ttl_minut
 
 
 @transaction.atomic
-def release_reservation(reservation: StockReservation):
-    if reservation.status != StockReservationStatus.ACTIVE:
+def release_reservation(
+    reservation: StockReservation,
+    *,
+    final_status: str = StockReservationStatus.RELEASED,
+):
+    """Release an active hold exactly once.
+
+    Callers often hold model instances read before another request finishes.
+    Lock and re-read the reservation so a concurrent consume/release cannot
+    create a second movement or overwrite the settled status.
+    """
+    if final_status not in {StockReservationStatus.RELEASED, StockReservationStatus.EXPIRED}:
+        raise ValueError("A released reservation must end as released or expired.")
+
+    locked = StockReservation.objects.select_for_update().get(pk=reservation.pk)
+    if locked.status != StockReservationStatus.ACTIVE:
         return
-    reservation.status = StockReservationStatus.RELEASED
-    reservation.save(update_fields=["status"])
+    locked.status = final_status
+    locked.save(update_fields=["status"])
     InventoryMovement.objects.create(
-        item=reservation.item, batch=reservation.batch, movement_type=InventoryMovementType.RELEASE,
-        quantity_delta=reservation.quantity, reference=str(reservation.order_id or reservation.cart_id or ""),
+        item=locked.item, batch=locked.batch, movement_type=InventoryMovementType.RELEASE,
+        quantity_delta=locked.quantity, reference=str(locked.order_id or locked.cart_id or ""),
     )
 
 
 @transaction.atomic
 def consume_reservation(reservation: StockReservation):
     """Called on order confirmation/payment success: permanently deducts the batch."""
-    if reservation.status != StockReservationStatus.ACTIVE:
+    locked = StockReservation.objects.select_for_update().get(pk=reservation.pk)
+    if locked.status != StockReservationStatus.ACTIVE:
         return
-    if reservation.batch:
-        batch = Batch.objects.select_for_update().get(pk=reservation.batch_id)
+    if locked.batch:
+        batch = Batch.objects.select_for_update().get(pk=locked.batch_id)
         if batch.expiration_date and batch.expiration_date <= timezone.now().date():
             raise ApplicationError(ErrorCodes.NO_VALID_BATCH, "Cannot sell an expired batch.")
-        batch.quantity -= reservation.quantity
+        batch.quantity -= locked.quantity
         batch.save(update_fields=["quantity"])
-    reservation.status = StockReservationStatus.CONSUMED
-    reservation.save(update_fields=["status"])
+    locked.status = StockReservationStatus.CONSUMED
+    locked.save(update_fields=["status"])
     InventoryMovement.objects.create(
-        item=reservation.item, batch=reservation.batch, movement_type=InventoryMovementType.SALE,
-        quantity_delta=-reservation.quantity, reference=str(reservation.order_id or ""),
+        item=locked.item, batch=locked.batch, movement_type=InventoryMovementType.SALE,
+        quantity_delta=-locked.quantity, reference=str(locked.order_id or ""),
     )
 
 
@@ -121,7 +136,7 @@ def release_expired_reservations():
     )
     count = 0
     for reservation in expired:
-        release_reservation(reservation)
+        release_reservation(reservation, final_status=StockReservationStatus.EXPIRED)
         count += 1
     return count
 

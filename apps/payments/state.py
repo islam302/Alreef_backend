@@ -157,6 +157,7 @@ PROVIDER_STATUS_MAP = {
     # vocabulary rather than a translation of somebody else's.
     "cod": {status: status for status in PaymentStatus.values},
     "instapay": {status: status for status in PaymentStatus.values},
+    "vodafone_cash": {status: status for status in PaymentStatus.values},
 }
 
 

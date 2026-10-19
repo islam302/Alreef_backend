@@ -1,0 +1,14 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2 style="margin:0 0 12px;color:#174b3a;">باقي خطوة واحدة</h2>
+<p>{% if customer_name %}أهلاً {{ customer_name }}، {% endif %}سجّلنا طلبك رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong>. عشان نأكده ونجهّزه، حوّل قيمته:</p>
+<table role="presentation" style="width:100%;border-collapse:collapse;margin:16px 0;background:#f5f1e7;border-radius:8px;">
+  <tr><td style="padding:12px 16px;color:#5b5b52;">{% if route == "vodafone_cash" %}رقم فودافون كاش{% else %}عنوان إنستاباي{% endif %}</td>
+      <td style="padding:12px 16px;font-size:20px;font-weight:bold;" dir="ltr">{{ pay_to }}</td></tr>
+  {% if account_name %}<tr><td style="padding:12px 16px;color:#5b5b52;">باسم</td><td style="padding:12px 16px;">{{ account_name }}</td></tr>{% endif %}
+  <tr><td style="padding:12px 16px;color:#5b5b52;">المبلغ</td><td style="padding:12px 16px;font-weight:bold;">{{ amount }} ج.م</td></tr>
+  <tr><td style="padding:12px 16px;color:#5b5b52;">اكتب في رسالة التحويل</td><td style="padding:12px 16px;font-weight:bold;" dir="ltr">{{ reference }}</td></tr>
+</table>
+<p>أول ما التحويل يوصلنا بنراجعه ونأكد الطلب ونبعتلك إيميل. لو ما وصلناش تحويل خلال {{ confirm_window_hours }} ساعة هنتواصل معاك.</p>
+{% if order_url %}<p style="margin:24px 0;"><a href="{{ order_url }}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">تابع طلبك</a></p>{% endif %}
+{% endblock %}

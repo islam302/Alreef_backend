@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.inventory.models import Batch, InventoryMovement, InventoryMovementType, StockReservationStatus
-from apps.inventory.services import consume_reservation, reserve_stock
+from apps.inventory.services import consume_reservation, release_expired_reservations, reserve_stock
 
 pytestmark = pytest.mark.django_db
 
@@ -133,6 +133,27 @@ def test_consume_reservation_is_idempotent_for_non_active_reservation(product_wi
     assert batch.quantity == 8
 
 
+def test_consume_reservation_is_idempotent_for_stale_instances(product_with_variant_and_stock):
+    """Two workers holding old ACTIVE instances must not deduct the batch twice."""
+    from apps.inventory.models import StockReservation
+
+    variant = product_with_variant_and_stock["variant"]
+    batch = product_with_variant_and_stock["batch"]
+    reservation = reserve_stock(variant=variant, quantity=2)[0]
+    first_copy = StockReservation.objects.get(pk=reservation.pk)
+    stale_copy = StockReservation.objects.get(pk=reservation.pk)
+
+    consume_reservation(first_copy)
+    consume_reservation(stale_copy)
+
+    batch.refresh_from_db()
+    assert batch.quantity == 8
+    assert InventoryMovement.objects.filter(
+        item=reservation.item,
+        movement_type=InventoryMovementType.SALE,
+    ).count() == 1
+
+
 def test_release_reservation_frees_up_available_quantity(product_with_variant_and_stock):
     from apps.inventory.services import get_or_create_item, release_reservation
 
@@ -148,3 +169,24 @@ def test_release_reservation_frees_up_available_quantity(product_with_variant_an
     assert get_or_create_item(variant).available_quantity == 10
     reservation.refresh_from_db()
     assert reservation.status == StockReservationStatus.RELEASED
+
+
+def test_expired_cart_reservation_is_released_once_and_marked_expired(product_with_variant_and_stock):
+    from apps.inventory.models import StockReservation
+
+    variant = product_with_variant_and_stock["variant"]
+    item = product_with_variant_and_stock["item"]
+    reservation = reserve_stock(variant=variant, quantity=3, cart_id="00000000-0000-0000-0000-000000000001", ttl_minutes=-1)[0]
+
+    assert release_expired_reservations() == 1
+    assert release_expired_reservations() == 0
+
+    reservation.refresh_from_db()
+    assert reservation.status == StockReservationStatus.EXPIRED
+    assert item.available_quantity == 10
+    assert StockReservation.objects.filter(pk=reservation.pk, status=StockReservationStatus.EXPIRED).exists()
+    assert InventoryMovement.objects.filter(
+        item=item,
+        movement_type=InventoryMovementType.RELEASE,
+        reference="00000000-0000-0000-0000-000000000001",
+    ).count() == 1

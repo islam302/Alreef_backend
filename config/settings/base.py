@@ -539,6 +539,24 @@ PAYMENT_PROVIDERS = {
         # How long the order waits for the transfer before staff should chase it.
         "CONFIRM_WINDOW_HOURS": config("INSTAPAY_CONFIRM_WINDOW_HOURS", default=24, cast=int),
     },
+    # Vodafone Cash, as a wallet transfer the customer makes and staff confirm.
+    #
+    # The same shape as InstaPay: the customer sends the amount from their own
+    # wallet to the shop's Vodafone Cash number, quoting the order number, and
+    # somebody at the shop confirms it arrived. No API, no fee. When Paymob's
+    # wallet integration is configured (PAYMOB_INTEGRATION_ID_WALLET), the mobile
+    # wallet method moves to Paymob on its own and this route stops being offered.
+    # See docs/payments/vodafone-cash.md.
+    "VODAFONE_CASH": {
+        "ENABLED": config("VODAFONE_CASH_ENABLED", default=False, cast=bool),
+        # The shop's Vodafone Cash wallet number, e.g. 010xxxxxxxx. Shown to
+        # customers — it is where they send money, not a credential.
+        "NUMBER": config("VODAFONE_CASH_NUMBER", default=""),
+        # The wallet owner's name as the customer's app shows it before sending,
+        # so a cautious customer can check they have the right wallet.
+        "ACCOUNT_NAME": config("VODAFONE_CASH_ACCOUNT_NAME", default=""),
+        "CONFIRM_WINDOW_HOURS": config("VODAFONE_CASH_CONFIRM_WINDOW_HOURS", default=24, cast=int),
+    },
     # Cash on delivery. No external API: the courier collects, and staff mark
     # it collected. Every number here is configurable because they are
     # commercial decisions, not code.

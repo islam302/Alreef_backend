@@ -23,7 +23,7 @@ from apps.payments.providers.base import PaymentProvider
 __all__ = ["PaymentProvider", "get_payment_provider", "GATEWAY_CODES"]
 
 #: Routes with a real adapter. `manage.py check_payments` reports on these.
-GATEWAY_CODES = ("cod", "instapay", "paymob")
+GATEWAY_CODES = ("cod", "instapay", "paymob", "vodafone_cash")
 
 #: Routes that exist as model choices but have no adapter, with the reason. Kept
 #: explicit so the error names the actual situation instead of "unknown provider".
@@ -45,6 +45,10 @@ def get_payment_provider(code: str) -> PaymentProvider:
         from apps.payments.providers.instapay import InstaPayPaymentProvider
 
         return InstaPayPaymentProvider()
+    if code == "vodafone_cash":
+        from apps.payments.providers.vodafone_cash import VodafoneCashPaymentProvider
+
+        return VodafoneCashPaymentProvider()
     if code == "paymob":
         from apps.payments.providers.paymob import PaymobPaymentProvider
 

@@ -74,6 +74,9 @@ SAFE_PAYMENT_METADATA_KEYS = (
     # InstaPay: where the customer was told to transfer, and what to quote.
     "instapay_address",
     "instapay_account_name",
+    # Vodafone Cash: the wallet the customer was told to send to.
+    "wallet_number",
+    "wallet_account_name",
     "transfer_amount",
     "transfer_reference",
     "confirm_window_hours",

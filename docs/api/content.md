@@ -17,7 +17,7 @@ python manage.py seed_content     # idempotent
 | Model | What it holds |
 |---|---|
 | `SiteSettings` | Singleton (pk=1): names, tagline, founding year, logo/OG image, contact email, announcement bar, default SEO. Read it with `SiteSettings.load()` — the row is created on first access. |
-| `ContactPhone` | `label, display, dial, is_whatsapp, is_primary, sort_order, is_active`. `dial` is digits-only with the country code (`201060604405`) and drives `tel:`/`wa.me`. At most one row is `is_primary`; promoting one demotes the other in the same transaction. |
+| `ContactPhone` | `label, display, dial, is_whatsapp, is_primary, sort_order, is_active`. `dial` is digits-only with the country code (`201554112325`) and drives `tel:`/`wa.me`. At most one row is `is_primary`; promoting one demotes the other in the same transaction. |
 | `Branch` | `name, address, region, plus_code, postal_code, maps_url, phone, working_hours_ar, sort_order, is_active`. |
 | `SocialLink` | `platform` (facebook/instagram/tiktok/youtube/whatsapp/x/linkedin/other), `label, url, sort_order, is_active`. |
 | `Page` | `slug, title_ar, title_en, subtitle_ar, body_ar, body_en, hero_image, hero_image_alt, meta_title, meta_description, is_published, sort_order`. |
@@ -46,18 +46,18 @@ Identity, phones, branches and social links in one payload — the header, the f
       "legal_name_ar": "شركة الريف للمواد الغذائية",
       "descriptor_ar": "عسل ومنتجات النحل", "descriptor_en": "Honey & bee products",
       "tagline_ar": "الريف، على سفرتك", "tagline_en": "El Rif, at your table",
-      "founded_year": 2005, "site_url": "https://alreef-honey.com",
+      "founded_year": null, "site_url": "https://alreef-honey.com",
       "logo": null, "og_image": null, "email": "", "support_hours_ar": "",
       "announcement_enabled": false, "announcement_text_ar": "", "announcement_url": "",
       "meta_title_ar": "…", "meta_description_ar": "…",
       "updated_at": "2026-09-20T06:32:57.895741+03:00"
     },
     "phones": [
-      { "id": 1, "label": "", "display": "010 6060 4405", "dial": "201060604405",
+      { "id": 1, "label": "", "display": "+20 15 54112325", "dial": "201554112325",
         "is_whatsapp": true, "is_primary": true, "sort_order": 0 }
     ],
     "branches": [
-      { "id": 1, "name": "المحل", "address": "محطة قطار شبشير الحصة، مركز طنطا، محافظة الغربية",
+      { "id": 1, "name": "الفرع الرئيسي", "address": "طريق طنطا المحلة أمام محطة قطار حصة شبشير",
         "region": "الغربية", "plus_code": "V35C+RPF", "postal_code": "6647775",
         "maps_url": "https://maps.google.com/?q=…", "phone": "", "working_hours_ar": "", "sort_order": 0 }
     ],

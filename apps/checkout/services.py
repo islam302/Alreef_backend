@@ -333,8 +333,44 @@ def create_order_from_cart(
         confirm_order(order, payment_received=False)
         payment.refresh_from_db()
         order.refresh_from_db()
+    elif payment.provider in TRANSFER_ROUTES and payment.status == "requires_action":
+        _email_transfer_details(order, payment)
 
     return order, payment
+
+
+#: Routes where the customer sends the money themselves and a person confirms it.
+TRANSFER_ROUTES = ("instapay", "vodafone_cash")
+
+
+def _email_transfer_details(order, payment):
+    """
+    Where to send the money, by email as well as on screen.
+
+    A customer who closes the confirmation page before writing down the wallet
+    number or InstaPay address has no other way to pay, and phones us. After
+    commit, so a checkout that rolls back sends nothing.
+    """
+    from apps.notifications.services import queue_email
+    from apps.orders.services import order_email_context
+
+    metadata = payment.metadata or {}
+    queue_email(
+        to=order.customer_email,
+        subject="payment_instructions",
+        template_name="payment_instructions",
+        context={
+            **order_email_context(order),
+            "route": payment.provider,
+            "pay_to": metadata.get("wallet_number") or metadata.get("instapay_address", ""),
+            "account_name": metadata.get("wallet_account_name") or metadata.get("instapay_account_name", ""),
+            "amount": metadata.get("transfer_amount") or str(payment.amount.amount),
+            "reference": metadata.get("transfer_reference", order.order_number),
+            "confirm_window_hours": metadata.get("confirm_window_hours", 24),
+        },
+        event="order_created",
+        user_id=order.user_id,
+    )
 
 
 @transaction.atomic

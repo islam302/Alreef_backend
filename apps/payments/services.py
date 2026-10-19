@@ -397,7 +397,7 @@ def mark_payment_expired(payment: Payment, *, reason: str = ""):
 #: member who confirms is the *only* evidence the money arrived — which is why
 #: every confirmation here writes an audit entry naming the actor, and why these
 #: endpoints are staff-only.
-MANUALLY_SETTLED_ROUTES = ("cod", "instapay")
+MANUALLY_SETTLED_ROUTES = ("cod", "instapay", "vodafone_cash")
 
 #: Wording per route, so an audit log reads as what actually happened rather than
 #: as a generic state change.
@@ -411,6 +411,11 @@ _MANUAL_NOTES = {
         "received": "InstaPay transfer confirmed received.",
         "refused": "No InstaPay transfer received.",
         "action": "instapay_confirmation",
+    },
+    "vodafone_cash": {
+        "received": "Vodafone Cash transfer confirmed received.",
+        "refused": "No Vodafone Cash transfer received.",
+        "action": "vodafone_cash_confirmation",
     },
 }
 

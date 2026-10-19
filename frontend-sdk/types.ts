@@ -1028,9 +1028,9 @@ export interface SiteSettings {
 export interface ContactPhone {
   id: number;
   label: string;
-  /** As printed, e.g. "010 6060 4405". */
+  /** As printed, e.g. "+20 10 01234567". */
   display: string;
-  /** Digits only with country code, for tel:/wa.me — e.g. "201060604405". */
+  /** Digits only with country code, for tel:/wa.me — e.g. "201001234567". */
   dial: string;
   is_whatsapp: boolean;
   is_primary: boolean;

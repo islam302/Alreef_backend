@@ -58,13 +58,13 @@ def site_content(db):
     settings_row = SiteSettings.load()
     settings_row.name_ar = "الريف"
     settings_row.tagline_ar = "الريف، على سفرتك"
-    settings_row.founded_year = 2005
+    settings_row.founded_year = None
     settings_row.save()
 
-    ContactPhone.objects.create(display="010 6060 4405", dial="201060604405", is_whatsapp=True, is_primary=True)
-    ContactPhone.objects.create(display="015 0585 8198", dial="201505858198", sort_order=1)
-    ContactPhone.objects.create(display="010 0000 0000", dial="201000000000", is_active=False, sort_order=2)
-    Branch.objects.create(name="المحل", address="شبشير الحصة، طنطا", region="الغربية")
+    ContactPhone.objects.create(display="+20 15 54112325", dial="201554112325", is_whatsapp=True, is_primary=True)
+    ContactPhone.objects.create(display="010 1000 0000", dial="201010000000", sort_order=1)
+    ContactPhone.objects.create(display="010 2000 0000", dial="201020000000", is_active=False, sort_order=2)
+    Branch.objects.create(name="الفرع الرئيسي", address="طريق طنطا المحلة أمام محطة قطار حصة شبشير", region="الغربية")
     SocialLink.objects.create(platform=SocialPlatform.FACEBOOK, label="فيسبوك", url="https://facebook.com/AlreeForHony")
     return settings_row
 
@@ -86,8 +86,8 @@ def test_site_bundle_is_public_and_hides_inactive_rows(api_client, site_content)
     assert response.status_code == 200
     data = response.data["data"]
     assert data["settings"]["name_ar"] == "الريف"
-    assert data["settings"]["founded_year"] == 2005
-    assert [p["dial"] for p in data["phones"]] == ["201060604405", "201505858198"]
+    assert data["settings"]["founded_year"] is None
+    assert [p["dial"] for p in data["phones"]] == ["201554112325", "201010000000"]
     assert data["branches"][0]["region"] == "الغربية"
     assert data["social"][0]["platform"] == "facebook"
 
@@ -135,7 +135,7 @@ def test_faq_list_is_ordered_and_skips_inactive(api_client):
 def test_anonymous_visitor_can_submit_the_contact_form(api_client):
     response = api_client.post(
         "/api/v1/content/contact-messages/",
-        {"name": "أحمد علي", "phone": "01060604405", "subject": "سؤال", "message": "عايز أعرف مواعيد التسليم."},
+        {"name": "أحمد علي", "phone": "01012345678", "subject": "سؤال", "message": "عايز أعرف مواعيد التسليم."},
         format="json",
     )
 
@@ -148,11 +148,11 @@ def test_anonymous_visitor_can_submit_the_contact_form(api_client):
 @pytest.mark.parametrize(
     "typed,stored",
     [
-        ("01060604405", "01060604405"),
-        ("010 6060 4405", "01060604405"),
-        ("010-6060-4405", "01060604405"),
-        ("+201060604405", "01060604405"),
-        ("201060604405", "01060604405"),
+        ("01012345678", "01012345678"),
+        ("010 1234 5678", "01012345678"),
+        ("010-1234-5678", "01012345678"),
+        ("+201012345678", "01012345678"),
+        ("201012345678", "01012345678"),
     ],
 )
 def test_contact_form_normalises_the_way_people_type_a_number(api_client, typed, stored):
@@ -181,7 +181,7 @@ def test_contact_form_cannot_set_staff_fields(api_client):
     api_client.post(
         "/api/v1/content/contact-messages/",
         {
-            "name": "أحمد علي", "phone": "01060604405", "message": "رسالة كافية للاختبار.",
+            "name": "أحمد علي", "phone": "01012345678", "message": "رسالة كافية للاختبار.",
             "status": "replied", "staff_note": "injected",
         },
         format="json",
@@ -193,7 +193,7 @@ def test_contact_form_cannot_set_staff_fields(api_client):
 
 
 def test_contact_form_is_throttled(api_client):
-    payload = {"name": "أحمد علي", "phone": "01060604405", "message": "رسالة كافية للاختبار."}
+    payload = {"name": "أحمد علي", "phone": "01012345678", "message": "رسالة كافية للاختبار."}
     statuses = [
         api_client.post("/api/v1/content/contact-messages/", payload, format="json").status_code
         for _ in range(7)
@@ -228,7 +228,7 @@ def test_admin_content_routes_reject_customers(authenticated_client, route):
 
 
 def test_customer_cannot_read_the_contact_inbox(authenticated_client):
-    ContactMessage.objects.create(name="أحمد", phone="01060604405", message="رسالة")
+    ContactMessage.objects.create(name="أحمد", phone="01012345678", message="رسالة")
 
     assert authenticated_client.get("/api/v1/admin-api/contact-messages/").status_code == 403
 
@@ -256,25 +256,25 @@ def test_site_settings_stays_a_singleton(staff_client):
 def test_staff_can_create_a_phone_and_only_one_stays_primary(staff_client):
     first = staff_client.post(
         "/api/v1/admin-api/contact-phones/",
-        {"display": "010 6060 4405", "dial": "201060604405", "is_primary": True},
+        {"display": "010 1000 0001", "dial": "201010000001", "is_primary": True},
         format="json",
     )
     assert first.status_code == 201
 
     staff_client.post(
         "/api/v1/admin-api/contact-phones/",
-        {"display": "015 0585 8198", "dial": "201505858198", "is_primary": True},
+        {"display": "015 2000 0002", "dial": "201520000002", "is_primary": True},
         format="json",
     )
 
     assert ContactPhone.objects.filter(is_primary=True).count() == 1
-    assert ContactPhone.objects.get(is_primary=True).dial == "201505858198"
+    assert ContactPhone.objects.get(is_primary=True).dial == "201520000002"
 
 
 def test_phone_dial_must_be_digits(staff_client):
     response = staff_client.post(
         "/api/v1/admin-api/contact-phones/",
-        {"display": "010 6060 4405", "dial": "+20 (106) 060-4405"},
+        {"display": "010 1000 0001", "dial": "+20 (101) 000-0001"},
         format="json",
     )
 
@@ -354,7 +354,7 @@ def test_staff_cannot_store_script_in_page_copy(staff_client, about_page):
 
 
 def test_triaging_a_message_records_who_handled_it(staff_client, staff_user):
-    message = ContactMessage.objects.create(name="أحمد", phone="01060604405", message="رسالة")
+    message = ContactMessage.objects.create(name="أحمد", phone="01012345678", message="رسالة")
 
     response = staff_client.patch(
         f"/api/v1/admin-api/contact-messages/{message.id}/",
@@ -370,7 +370,7 @@ def test_triaging_a_message_records_who_handled_it(staff_client, staff_user):
 
 
 def test_staff_cannot_rewrite_a_customer_message(staff_client):
-    message = ContactMessage.objects.create(name="أحمد", phone="01060604405", message="الرسالة الأصلية")
+    message = ContactMessage.objects.create(name="أحمد", phone="01012345678", message="الرسالة الأصلية")
 
     staff_client.patch(
         f"/api/v1/admin-api/contact-messages/{message.id}/", {"message": "محرَّفة"}, format="json"
@@ -381,8 +381,8 @@ def test_staff_cannot_rewrite_a_customer_message(staff_client):
 
 
 def test_unread_count_reports_new_messages(staff_client):
-    ContactMessage.objects.create(name="أ", phone="01060604405", message="١")
-    ContactMessage.objects.create(name="ب", phone="01060604405", message="٢", status=ContactMessageStatus.READ)
+    ContactMessage.objects.create(name="أ", phone="01012345678", message="١")
+    ContactMessage.objects.create(name="ب", phone="01012345678", message="٢", status=ContactMessageStatus.READ)
 
     response = staff_client.get("/api/v1/admin-api/contact-messages/unread-count/")
 
@@ -397,6 +397,6 @@ def test_seed_content_is_idempotent(db):
     call_command("seed_content")
 
     assert SiteSettings.objects.count() == 1
-    assert ContactPhone.objects.count() == 2
+    assert ContactPhone.objects.count() == 1
     assert Page.objects.filter(slug="about").count() == 1
     assert FaqItem.objects.count() == 8

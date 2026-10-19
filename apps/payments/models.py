@@ -27,6 +27,9 @@ class PaymentProviderCode(models.TextChoices):
 
     PAYMOB = "paymob", "Paymob"
     INSTAPAY = "instapay", "InstaPay transfer"
+    # A wallet-to-wallet transfer to the shop's Vodafone Cash number, confirmed by
+    # staff. Paymob takes over mobile wallets once its wallet integration is set.
+    VODAFONE_CASH = "vodafone_cash", "Vodafone Cash transfer"
     COD = "cod", "Cash on delivery"
     MANUAL = "manual", "Manual / store credit"
 

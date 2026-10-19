@@ -16,7 +16,8 @@ because the customer's money has moved and our record of it has not.
 
 WHAT THIS SHOP ACCEPTS. Four methods, and no more: cash on delivery, card
 (Visa / Mastercard / Meeza), mobile wallet (Vodafone Cash and the other Egyptian
-wallets), and InstaPay. Fawry, valU, Sympl and Aman were implemented and then
+wallets — through Paymob, or as a transfer to the shop's Vodafone Cash number
+that staff confirm), and InstaPay. Fawry, valU, Sympl and Aman were implemented and then
 removed at the business's request — an adapter for a method nobody sells is an
 adapter nobody tests.
 
@@ -120,6 +121,30 @@ METHOD_SPECS = (
         requires=_PAYMOB_BASE + ("INTEGRATION_ID_WALLET",),
         redirects=True,
         refund_requires=_PAYMOB_REFUND,
+        sort_order=30,
+    ),
+    # --- Mobile wallet, the manual route ----------------------------------
+    #
+    # After the Paymob entry on purpose: `_preferred_spec_for` takes the first
+    # available route, so configuring Paymob's wallet integration moves the
+    # method there and this one leaves checkout with nothing edited. Until then
+    # the customer sends the amount to the shop's Vodafone Cash number and staff
+    # confirm it, like InstaPay.
+    MethodSpec(
+        method=PaymentMethodSnapshot.MOBILE_WALLET,
+        gateway="vodafone_cash",
+        config_key="VODAFONE_CASH",
+        label_ar="فودافون كاش",
+        label_en="Vodafone Cash transfer",
+        instructions_ar="هنديك رقم محفظة الريف، تحوّل المبلغ من محفظتك، وبنأكد الطلب أول ما التحويل يوصل.",
+        requires=("NUMBER",),
+        # The customer pays from their own phone; there is nowhere to send them.
+        redirects=False,
+        refund_is_manual=True,
+        manual_refund_note_ar=(
+            "استرداد فودافون كاش بيتعمل بالإيد — حوّل المبلغ تاني لمحفظة العميل، "
+            "وبعدين سجّله هنا عشان الطلب يتظبط."
+        ),
         sort_order=30,
     ),
     # --- InstaPay, the Paymob route ---------------------------------------

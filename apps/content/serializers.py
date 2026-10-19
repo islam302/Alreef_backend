@@ -116,7 +116,7 @@ class ContactMessageCreateSerializer(serializers.ModelSerializer):
     """
 
     # Declared explicitly so the model's strict validator does not run before
-    # the value is normalised: people type "010 6060 4405", and rejecting that
+    # the value is normalised: people type "010 1234 5678", and rejecting that
     # would be the form being pedantic rather than the number being wrong.
     phone = serializers.CharField(max_length=20)
 
@@ -137,7 +137,7 @@ class ContactMessageCreateSerializer(serializers.ModelSerializer):
         elif cleaned.startswith("20") and len(cleaned) == 12:
             cleaned = "0" + cleaned[2:]
         if not EG_MOBILE_RE.match(cleaned):
-            raise serializers.ValidationError("Enter an Egyptian mobile number, e.g. 01060604405.")
+            raise serializers.ValidationError("Enter an Egyptian mobile number, e.g. 01012345678.")
         return cleaned
 
     def validate_message(self, value):

@@ -98,6 +98,12 @@ otherwise.
 
 ---
 
+## Vodafone Cash without a gateway
+
+Until Paymob's wallet integration is configured, the mobile wallet method can be
+offered as a transfer to the shop's Vodafone Cash number that staff confirm, set
+up exactly like InstaPay. See `vodafone-cash.md`.
+
 ## Paymob
 
 One gateway, three methods: card, mobile wallet, and InstaPay when it arrives. The

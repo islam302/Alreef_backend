@@ -35,9 +35,40 @@ class OrderListSerializer(serializers.ModelSerializer):
         return sum(i.quantity for i in obj.items.all())
 
 
+def payment_summary(order):
+    """
+    The order's latest payment as the customer may see it, or None.
+
+    The same published instructions checkout returned — where to send a transfer
+    and what to quote — so a customer who closed the confirmation page can still
+    pay from their order page. Nothing secret, and never the provider's payload.
+    """
+    payment = order.payments.order_by("-created_at").first()
+    if payment is None:
+        return None
+    metadata = payment.metadata or {}
+    return {
+        "id": payment.id,
+        "method": payment.method,
+        # Which route settles it: the storefront words a transfer to a Vodafone
+        # Cash number differently from one to an InstaPay address.
+        "provider": payment.provider,
+        "status": payment.status,
+        "amount": str(payment.amount.amount),
+        "instructions_ar": metadata.get("instructions_ar", ""),
+        "pay_to": metadata.get("instapay_address") or metadata.get("wallet_number", ""),
+        "pay_to_name": metadata.get("wallet_account_name") or metadata.get("instapay_account_name", ""),
+        "pay_reference": metadata.get("transfer_reference", order.order_number),
+    }
+
+
 class OrderDetailSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
+    payment = serializers.SerializerMethodField()
+
+    def get_payment(self, obj):
+        return payment_summary(obj)
 
     class Meta:
         model = Order
@@ -47,7 +78,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "subtotal", "coupon_code", "coupon_discount", "promotion_discount", "loyalty_discount",
             "gift_card_amount_used", "store_credit_amount_used", "tax_total", "shipping_total", "cod_fee",
             "grand_total", "notes", "cancel_reason", "items", "status_history",
-            "confirmed_at", "shipped_at", "delivered_at", "cancelled_at", "created_at",
+            "confirmed_at", "shipped_at", "delivered_at", "cancelled_at", "created_at", "payment",
         ]
         read_only_fields = fields
 
@@ -114,20 +145,7 @@ class GuestOrderStatusSerializer(serializers.ModelSerializer):
         return {"governorate": snapshot.get("governorate", ""), "city": snapshot.get("city", "")}
 
     def get_payment(self, obj):
-        payment = obj.payments.order_by("-created_at").first()
-        if payment is None:
-            return None
-        metadata = payment.metadata or {}
-        return {
-            "id": payment.id,
-            "method": payment.method,
-            "status": payment.status,
-            # The same published instructions checkout returned: where to send a
-            # transfer and what to quote. Not secrets.
-            "instructions_ar": metadata.get("instructions_ar", ""),
-            "pay_to": metadata.get("instapay_address", ""),
-            "pay_reference": metadata.get("transfer_reference", obj.order_number),
-        }
+        return payment_summary(obj)
 
 
 class OrderCancelSerializer(serializers.Serializer):

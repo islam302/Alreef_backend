@@ -16,13 +16,13 @@ from apps.core.validators import validate_image_file, validate_no_unsafe_html
 # Egyptian mobile number in the form the storefront form accepts: 01[0125] + 8 digits.
 EG_MOBILE_VALIDATOR = RegexValidator(
     regex=r"^01[0125]\d{8}$",
-    message="Enter an Egyptian mobile number, e.g. 01060604405.",
+    message="Enter an Egyptian mobile number, e.g. 01012345678.",
 )
 
-# Dial-ready form used for tel:/wa.me links, e.g. 201060604405.
+# Dial-ready form used for tel:/wa.me links, e.g. 201001234567.
 DIAL_VALIDATOR = RegexValidator(
     regex=r"^\d{8,15}$",
-    message="Digits only, country code first, e.g. 201060604405.",
+    message="Digits only, country code first, e.g. 201001234567.",
 )
 
 
@@ -104,8 +104,8 @@ class ContactPhone(BaseModel):
     """A number the shop actually answers. `dial` drives tel:/wa.me links."""
 
     label = models.CharField(max_length=80, blank=True)
-    display = models.CharField(max_length=40, help_text="As printed, e.g. 010 6060 4405.")
-    dial = models.CharField(max_length=20, validators=[DIAL_VALIDATOR], help_text="e.g. 201060604405")
+    display = models.CharField(max_length=40, help_text="As printed, e.g. +20 10 01234567.")
+    dial = models.CharField(max_length=20, validators=[DIAL_VALIDATOR], help_text="e.g. 201001234567")
     is_whatsapp = models.BooleanField(default=False)
     is_primary = models.BooleanField(default=False)
     sort_order = models.PositiveSmallIntegerField(default=0)

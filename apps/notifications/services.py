@@ -30,6 +30,7 @@ EMAIL_SUBJECTS = {
     "order_shipped": "طلبك خرج للشحن — رقم {order_number}",
     "order_delivered": "طلبك وصل — رقم {order_number}",
     "order_cancelled": "طلبك اتلغى — رقم {order_number}",
+    "payment_instructions": "باقي خطوة: حوّل قيمة طلب رقم {order_number}",
     "verify_email": "أكّد إيميلك",
     "reset_password": "إعادة تعيين كلمة السر",
     "welcome": "أهلاً بيك في الريف",

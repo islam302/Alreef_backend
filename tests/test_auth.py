@@ -1,3 +1,5 @@
+from unittest import mock
+
 import pytest
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -30,6 +32,32 @@ def test_register_success(api_client):
     assert body["success"] is True
     assert body["data"]["email"] == "newuser@example.com"
     assert User.objects.filter(email="newuser@example.com").exists()
+
+
+def test_register_sends_frontend_email_verification_link(api_client, settings):
+    settings.FRONTEND_URL = "https://shop.alreef.test"
+
+    with mock.patch("apps.users.views.send_email_task") as task:
+        response = api_client.post(
+            REGISTER_URL,
+            {
+                "email": "verify-link@example.com",
+                "password": STRONG_PASSWORD,
+                "first_name": "Verify",
+                "last_name": "Link",
+            },
+            format="json",
+        )
+
+    assert response.status_code == 201
+    verification_calls = [
+        call for call in task.delay.call_args_list
+        if call.kwargs.get("event") == "email_verification"
+    ]
+    assert len(verification_calls) == 1
+    verify_url = verification_calls[0].kwargs["context"]["verify_url"]
+    assert verify_url.startswith("https://shop.alreef.test/verify-email?token=")
+    assert "/api/" not in verify_url
 
 
 def test_register_duplicate_email_returns_409(api_client, user):
@@ -184,7 +212,7 @@ def test_an_egyptian_local_mobile_number_is_accepted(authenticated_client, gover
         {
             "label": "home",
             "full_name": "Test Customer",
-            "phone": "01060604405",
+            "phone": "01012345678",
             "governorate": governorate.id,
             "street": "Station St",
             "building": "12",
@@ -195,4 +223,4 @@ def test_an_egyptian_local_mobile_number_is_accepted(authenticated_client, gover
 
     assert response.status_code == 201, response.content
     # Normalised on the way in, so everything downstream sees one format.
-    assert response.json()["data"]["phone"] == "+201060604405"
+    assert response.json()["data"]["phone"] == "+201012345678"
