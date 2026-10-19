@@ -5,9 +5,10 @@ from rest_framework.views import APIView
 from apps.chatbot import services
 from apps.chatbot.serializers import ChatReplySerializer, ChatRequestSerializer
 from apps.core.response import success_response
+from apps.core.schema import envelope
 
 
-@extend_schema(tags=["Chat"], request=ChatRequestSerializer, responses=ChatReplySerializer)
+@extend_schema(tags=["Chat"], request=ChatRequestSerializer, responses=envelope(ChatReplySerializer, name="ChatReply"))
 class ChatView(APIView):
     """
     POST /api/v1/chat/

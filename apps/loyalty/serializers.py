@@ -10,7 +10,7 @@ class LoyaltyAccountSerializer(serializers.ModelSerializer):
         model = LoyaltyAccount
         fields = ["points_balance", "lifetime_points_earned", "tier_name"]
 
-    def get_tier_name(self, obj):
+    def get_tier_name(self, obj) -> str | None:
         tier = obj.current_tier
         return tier.name if tier else None
 

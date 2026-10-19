@@ -31,10 +31,10 @@ class ShippingQuoteSerializer(serializers.Serializer):
     currency = serializers.SerializerMethodField()
     is_free = serializers.BooleanField()
 
-    def get_price(self, obj):
+    def get_price(self, obj) -> str:
         return str(obj.price.amount)
 
-    def get_currency(self, obj):
+    def get_currency(self, obj) -> str:
         return str(obj.price.currency)
 
 

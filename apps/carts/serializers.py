@@ -17,7 +17,7 @@ class CartItemSerializer(serializers.ModelSerializer):
         model = CartItem
         fields = ["id", "variant", "product_name", "product_name_ar", "quantity", "unit_price_snapshot", "line_total"]
 
-    def get_line_total(self, obj):
+    def get_line_total(self, obj) -> str:
         return str(obj.line_total.amount)
 
 
@@ -30,12 +30,12 @@ class CartSerializer(serializers.ModelSerializer):
         model = Cart
         fields = ["id", "currency", "coupon_code", "items", "subtotal", "item_count", "created_at", "updated_at"]
 
-    def get_subtotal(self, obj):
+    def get_subtotal(self, obj) -> str:
         from apps.carts.services import get_cart_subtotal
 
         return str(get_cart_subtotal(obj).amount)
 
-    def get_item_count(self, obj):
+    def get_item_count(self, obj) -> int:
         return sum(item.quantity for item in obj.items.all())
 
 

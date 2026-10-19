@@ -24,7 +24,9 @@ on:
 concurrency:
   # A new push supersedes an in-flight run on the same ref. Saves runner time
   # without ever cancelling a run on a different branch.
-  group: tests-${{ github.ref }}
+  # github.workflow names the caller under workflow_call, so the push run and
+  # the run CD calls as its gate no longer cancel each other.
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -243,7 +245,7 @@ jobs:
         # rather than blocked, because guessing a return type would put a
         # confident lie in the contract instead of an honest gap.
         env:
-          MAX_UNTYPED_FIELDS: "41"
+          MAX_UNTYPED_FIELDS: "39"
         run: |
           python manage.py check --deploy 2>&1 | tee check.log || true
 

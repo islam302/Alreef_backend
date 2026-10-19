@@ -31,7 +31,7 @@ class OrderListSerializer(serializers.ModelSerializer):
         model = Order
         fields = ["id", "order_number", "status", "grand_total", "currency", "item_count", "created_at"]
 
-    def get_item_count(self, obj):
+    def get_item_count(self, obj) -> int:
         return sum(i.quantity for i in obj.items.all())
 
 

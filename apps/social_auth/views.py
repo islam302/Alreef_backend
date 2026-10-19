@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.core.response import success_response
+from apps.core.schema import envelope
 from apps.notifications.tasks import send_email_task
 from apps.social_auth import services
 from apps.social_auth.models import SocialProvider
@@ -56,13 +57,28 @@ class _SocialLoginView(APIView):
         )
 
 
-@extend_schema(tags=["Auth"], request=inline_serializer("GoogleLogin", {"credential": serializers.CharField()}))
+# Both answer exactly like /auth/login/, plus `created`.
+SOCIAL_LOGIN_RESULT = inline_serializer(
+    "SocialLoginResult",
+    {"refresh": serializers.CharField(), "access": serializers.CharField(), "user": UserSerializer(), "created": serializers.BooleanField()},
+)
+
+
+@extend_schema(
+    tags=["Auth"],
+    request=inline_serializer("GoogleLogin", {"credential": serializers.CharField()}),
+    responses=envelope(SOCIAL_LOGIN_RESULT, name="GoogleLogin"),
+)
 class GoogleLoginView(_SocialLoginView):
     provider = SocialProvider.GOOGLE
     token_field = "credential"
 
 
-@extend_schema(tags=["Auth"], request=inline_serializer("FacebookLogin", {"access_token": serializers.CharField()}))
+@extend_schema(
+    tags=["Auth"],
+    request=inline_serializer("FacebookLogin", {"access_token": serializers.CharField()}),
+    responses=envelope(SOCIAL_LOGIN_RESULT, name="FacebookLogin"),
+)
 class FacebookLoginView(_SocialLoginView):
     provider = SocialProvider.FACEBOOK
     token_field = "access_token"

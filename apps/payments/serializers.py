@@ -23,7 +23,7 @@ class PaymentMethodSerializer(serializers.Serializer):
     sort_order = serializers.IntegerField()
     cod_fee = serializers.SerializerMethodField()
 
-    def get_cod_fee(self, spec):
+    def get_cod_fee(self, spec) -> str | None:
         """The surcharge, as a string, or null. Only COD has one today."""
         if spec.method != "cod":
             return None
