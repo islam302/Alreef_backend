@@ -72,6 +72,7 @@ LOCAL_APPS = [
     "apps.content",
     "apps.admin_api",
     "apps.social_auth",
+    "apps.chatbot",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -234,6 +235,9 @@ REST_FRAMEWORK = {
         "order_lookup": "10/min",
         # Anonymous, unauthenticated writes to the events table.
         "analytics": "60/min",
+        # Each message is forwarded to a paid third-party model, so a script
+        # must not be able to spend the shop's credit at the generic rate.
+        "chat": "12/min",
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
@@ -458,6 +462,13 @@ GOOGLE_OAUTH_CLIENT_ID = config("GOOGLE_OAUTH_CLIENT_ID", default="")
 FACEBOOK_APP_ID = config("FACEBOOK_APP_ID", default="")
 FACEBOOK_APP_SECRET = config("FACEBOOK_APP_SECRET", default="")
 FACEBOOK_GRAPH_VERSION = config("FACEBOOK_GRAPH_VERSION", default="v21.0")
+
+# Storefront chat assistant (apps.chatbot), answered by the Zaychain RAG API.
+# The key is a secret: it lives only here and is never sent to the browser,
+# which talks to /api/v1/chat/ instead. Empty switches the assistant off.
+CHATBOT_API_URL = config("CHATBOT_API_URL", default="https://chatbot-api.zaychain.com/api/v1/chat/")
+CHATBOT_API_KEY = config("CHATBOT_API_KEY", default="")
+CHATBOT_TIMEOUT_SECONDS = config("CHATBOT_TIMEOUT_SECONDS", default=30, cast=int)
 
 # This API's own public origin. Payment providers call our webhook endpoints
 # out of band, so the URL we register with them must come from configuration

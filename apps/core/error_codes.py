@@ -94,6 +94,10 @@ class ErrorCodes:
     REVIEW_NOT_ELIGIBLE = "REVIEW_NOT_ELIGIBLE"
     REVIEW_ALREADY_EXISTS = "REVIEW_ALREADY_EXISTS"
 
+    # Chat assistant
+    CHAT_DISABLED = "CHAT_DISABLED"
+    CHAT_UNAVAILABLE = "CHAT_UNAVAILABLE"
+
 
 ERROR_STATUS_MAP = {
     ErrorCodes.VALIDATION_ERROR: 400,
@@ -167,6 +171,10 @@ ERROR_STATUS_MAP = {
     ErrorCodes.LOYALTY_INSUFFICIENT_POINTS: 409,
     ErrorCodes.REVIEW_NOT_ELIGIBLE: 403,
     ErrorCodes.REVIEW_ALREADY_EXISTS: 409,
+    # The assistant is a third-party service. Neither is the customer's fault:
+    # not configured on this server, or configured but not answering.
+    ErrorCodes.CHAT_DISABLED: 503,
+    ErrorCodes.CHAT_UNAVAILABLE: 503,
 }
 
 
