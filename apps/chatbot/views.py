@@ -25,5 +25,5 @@ class ChatView(APIView):
         serializer = ChatRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        answer = services.ask(data["question"], data["history"], data["language"])
+        answer = services.ask(data["question"], data["history"])
         return success_response({"answer": answer})

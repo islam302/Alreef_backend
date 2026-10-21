@@ -17,7 +17,7 @@ from apps.core.error_codes import ApplicationError, ErrorCodes
 logger = logging.getLogger(__name__)
 
 
-def ask(question, history, language):
+def ask(question, history):
     """Forward one question with its recent history → the assistant's answer."""
     if not settings.CHATBOT_API_KEY:
         raise ApplicationError(ErrorCodes.CHAT_DISABLED, "The chat assistant is not enabled.")
@@ -25,7 +25,7 @@ def ask(question, history, language):
     try:
         response = requests.post(
             settings.CHATBOT_API_URL,
-            json={"question": question, "history": history, "language": language},
+            json={"question": question, "history": history},
             headers={"Authorization": f"ApiKey {settings.CHATBOT_API_KEY}", "Accept": "application/json"},
             timeout=settings.CHATBOT_TIMEOUT_SECONDS,
         )

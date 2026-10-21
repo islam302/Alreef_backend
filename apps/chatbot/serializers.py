@@ -15,7 +15,7 @@ class ChatTurnSerializer(serializers.Serializer):
 class ChatRequestSerializer(serializers.Serializer):
     question = serializers.CharField(max_length=2000, trim_whitespace=True)
     history = ChatTurnSerializer(many=True, required=False, default=list)
-    language = serializers.ChoiceField(choices=["ar", "en"], required=False, default="ar")
+    # No language field: the assistant answers in the language of the question.
 
     def validate_history(self, value):
         return value[-MAX_HISTORY:]
