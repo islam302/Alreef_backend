@@ -513,7 +513,9 @@ def test_stored_webhook_payload_has_secrets_redacted(
     post_paymob(api_client, transaction)
 
     stored = json.dumps(PaymentWebhookEvent.objects.get().payload)
-    assert "2346" not in stored  # the PAN
+    # The PAN as a whole JSON value, not a bare substring: ids, references and
+    # timestamps are random and contained the digits 2346 now and then.
+    assert '"2346"' not in stored
     assert paymob_signature(transaction) not in stored
     assert PAYMOB_TEST_CONFIG["HMAC_SECRET"] not in stored
 
