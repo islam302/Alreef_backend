@@ -24,6 +24,7 @@ from apps.content.models import (
     SocialLink,
     SocialPlatform,
 )
+from apps.content.policy_pages import create_missing
 
 SITE = {
     "name_ar": "الريف",
@@ -252,6 +253,10 @@ class Command(BaseCommand):
             for section in sections:
                 PageSection.objects.update_or_create(page=page, key=section["key"], defaults=section)
             page_data["sections"] = sections  # keep the module-level data intact
+
+        self.stdout.write("Seeding policy pages...")
+        created = create_missing(Page, PageSection, email=settings_row.email)
+        self.stdout.write(f"  created: {', '.join(created) or 'none (already there)'}")
 
         self.stdout.write("Seeding FAQ...")
         for index, faq in enumerate(FAQS):

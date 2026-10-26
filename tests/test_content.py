@@ -31,6 +31,9 @@ from apps.content.models import (
 )
 from apps.users.models import User
 
+#: Published by migration 0005 in every database, the test one included.
+POLICY_SLUGS = {"privacy-policy", "refund-policy", "shipping-policy"}
+
 pytestmark = pytest.mark.django_db
 
 
@@ -115,7 +118,9 @@ def test_unpublished_page_is_invisible_publicly(api_client, about_page):
     about_page.save()
 
     assert api_client.get("/api/v1/content/pages/about/").status_code == 404
-    assert api_client.get("/api/v1/content/pages/").data["data"] == []
+    listed = [p["slug"] for p in api_client.get("/api/v1/content/pages/").data["data"]]
+    assert "about" not in listed
+    assert set(listed) <= POLICY_SLUGS  # created by migration 0005
 
 
 def test_faq_list_is_ordered_and_skips_inactive(api_client):
@@ -314,8 +319,9 @@ def test_admin_page_list_keeps_display_order(staff_client, about_page):
 
     response = staff_client.get("/api/v1/admin-api/pages/")
 
-    assert [p["slug"] for p in response.data["data"]] == ["about", "contact", "shipping"]
-    assert response.data["data"][0]["section_count"] == 2
+    shown = [p for p in response.data["data"] if p["slug"] not in POLICY_SLUGS]
+    assert [p["slug"] for p in shown] == ["about", "contact", "shipping"]
+    assert shown[0]["section_count"] == 2
 
 
 def test_page_reorder_is_not_swallowed_by_the_slug_lookup(staff_client, about_page):
