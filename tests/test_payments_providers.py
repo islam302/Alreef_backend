@@ -404,6 +404,46 @@ def test_paymob_create_payment_sends_our_amount_in_cents_and_our_reference(
     assert body["notification_url"] == "https://api.example.test/api/v1/payments/webhooks/paymob/"
 
 
+def _items_total(body):
+    return sum(item["amount"] * item["quantity"] for item in body["items"])
+
+
+def test_paymob_intention_items_add_up_to_the_amount_with_shipping(
+    paymob_enabled, gateway, order_with_payment
+):
+    order, payment = order_with_payment
+    payment.method = "card"
+    recorder = gateway((201, {"id": "int_1", "client_secret": "cs_1"}))
+
+    get_payment_provider("paymob").create_payment(payment=payment, order=order)
+
+    body = recorder.calls[0]["json"]
+    # Paymob rejects an intention whose items do not sum to its amount.
+    assert _items_total(body) == body["amount"]
+    assert order.shipping_total.amount > 0
+    assert body["items"][-1]["name"] == "Shipping & fees"
+
+
+def test_paymob_intention_is_one_line_when_something_came_off(
+    paymob_enabled, gateway, order_with_payment
+):
+    from decimal import Decimal
+
+    from djmoney.money import Money
+
+    order, payment = order_with_payment
+    payment.method = "card"
+    # A gift card or discount paid part of it: the products alone exceed the charge.
+    payment.amount = Money(Decimal("1.00"), "EGP")
+    recorder = gateway((201, {"id": "int_1", "client_secret": "cs_1"}))
+
+    get_payment_provider("paymob").create_payment(payment=payment, order=order)
+
+    body = recorder.calls[0]["json"]
+    assert body["amount"] == 100
+    assert body["items"] == [{"name": f"Order {order.order_number}", "amount": 100, "quantity": 1}]
+
+
 @pytest.mark.parametrize("method,integration_id", [("card", 4001), ("mobile_wallet", 4002)])
 def test_paymob_routes_each_method_to_its_own_integration_id(
     paymob_enabled, gateway, order_with_payment, method, integration_id

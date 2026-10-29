@@ -232,6 +232,38 @@ class PaymobPaymentProvider(PaymentProvider):
         base = (self.config.get("BASE_URL") or "https://accept.paymob.com").rstrip("/")
         return f"{base}{self.CHECKOUT_PATH}?publicKey={public_key}&clientSecret={client_secret}"
 
+    def _intention_items(self, *, payment, order) -> list:
+        """
+        The intention's line items, always adding up to the amount charged.
+
+        Paymob checks that the items' amount × quantity sum to the intention
+        `amount`. The products alone never do: shipping, the COD fee and tax
+        are on top, and discounts, gift cards and store credit come off. So the
+        products are listed with one "Shipping & fees" line when that is exact;
+        when anything came off, the order goes as a single line for the amount
+        actually charged — never products that add up to more than the customer
+        pays.
+        """
+        amount = self._to_cents(payment.amount.amount)
+        lines = [
+            {
+                "name": item.product_name_snapshot[:120] or "Item",
+                "amount": self._to_cents(item.unit_price.amount),
+                "quantity": item.quantity,
+            }
+            for item in order.items.all()
+        ]
+        rest = amount - sum(line["amount"] * line["quantity"] for line in lines)
+        fees = sum(
+            self._to_cents(getattr(order, field).amount)
+            for field in ("shipping_total", "cod_fee", "tax_total")
+        )
+        if lines and rest == fees:
+            if rest:
+                lines.append({"name": "Shipping & fees", "amount": rest, "quantity": 1})
+            return lines
+        return [{"name": f"Order {order.order_number}", "amount": amount, "quantity": 1}]
+
     # -- provider interface ------------------------------------------------
 
     def create_payment(self, *, payment, order) -> CreatePaymentResult:
@@ -273,14 +305,7 @@ class PaymobPaymentProvider(PaymentProvider):
             "notification_url": webhook_url("paymob"),
             "redirection_url": frontend_url("/order/payment-return", payment=payment.id),
             "billing_data": billing_data,
-            "items": [
-                {
-                    "name": item.product_name_snapshot[:120] or "Item",
-                    "amount": self._to_cents(item.unit_price.amount),
-                    "quantity": item.quantity,
-                }
-                for item in order.items.all()
-            ],
+            "items": self._intention_items(payment=payment, order=order),
             "extras": {"order_number": order.order_number, "payment_id": payment.id},
         }
 
