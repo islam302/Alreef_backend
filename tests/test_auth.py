@@ -214,6 +214,7 @@ def test_an_egyptian_local_mobile_number_is_accepted(authenticated_client, gover
             "full_name": "Test Customer",
             "phone": "01012345678",
             "governorate": governorate.id,
+            "district": "Heliopolis",
             "street": "Station St",
             "building": "12",
             "is_default": True,

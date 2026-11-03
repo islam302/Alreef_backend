@@ -143,7 +143,7 @@ def test_catalog_filters(api_client, product_with_variant_and_stock, category, b
 
 
 def test_address_crud_and_default(authenticated_client, address, governorate):
-    payload = {"full_name": "Jane", "phone": "+201001234568", "governorate": governorate.id, "street": "Tahrir", "is_default": False}
+    payload = {"full_name": "Jane", "phone": "+201001234568", "governorate": governorate.id, "district": "Downtown", "street": "Tahrir", "building": "4", "is_default": False}
     created = authenticated_client.post("/api/v1/addresses/", payload, format="json")
     assert created.status_code == 201, created.content
     new_id = created.json()["data"]["id"]

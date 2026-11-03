@@ -38,7 +38,7 @@ def _guest_with_cart(variant, quantity=1):
 def _guest_body(governorate, method, *, phone=GUEST_PHONE, email="guest@example.com", payment="cod", **extra):
     body = {
         "contact": {"full_name": "Guest Buyer", "phone": phone, "email": email},
-        "address": {"governorate": governorate.id, "street": "12 Tahrir St", "building": "3"},
+        "address": {"governorate": governorate.id, "district": "Downtown", "street": "12 Tahrir St", "building": "3"},
         "shipping_method_id": method.id,
         "payment_method": payment,
     }
@@ -373,3 +373,14 @@ def test_staff_see_a_guest_order_in_the_dashboard(guest_order, staff_client):
     detail = staff_client.get(f"/api/v1/admin-api/orders/{order.order_number}/")
     assert detail.status_code == 200, detail.content
     assert detail.json()["data"]["customer_phone"] == GUEST_PHONE_E164
+
+
+@pytest.mark.parametrize("missing", ["district", "building"])
+def test_a_guest_address_needs_the_area_and_the_building(api_client, governorate, missing):
+    from apps.checkout.serializers import GuestAddressSerializer
+
+    data = {"governorate": governorate.id, "district": "Downtown", "street": "12 Tahrir St", "building": "3"}
+    data[missing] = ""
+    serializer = GuestAddressSerializer(data=data)
+    assert not serializer.is_valid()
+    assert missing in serializer.errors

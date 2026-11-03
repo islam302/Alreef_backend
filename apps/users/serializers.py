@@ -171,6 +171,11 @@ class AddressSerializer(serializers.ModelSerializer):
             "is_default", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+        # The courier needs the area and the building, not just a street name.
+        extra_kwargs = {
+            "district": {"required": True, "allow_blank": False},
+            "building": {"required": True, "allow_blank": False},
+        }
 
     def create(self, validated_data):
         validated_data["user"] = self.context["request"].user

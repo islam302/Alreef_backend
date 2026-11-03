@@ -54,6 +54,11 @@ class GuestAddressSerializer(serializers.ModelSerializer):
             "governorate", "city", "district", "street", "building", "floor", "apartment",
             "landmark", "postal_code", "notes",
         ]
+        # The courier needs the area and the building, not just a street name.
+        extra_kwargs = {
+            "district": {"required": True, "allow_blank": False},
+            "building": {"required": True, "allow_blank": False},
+        }
 
     def validate(self, attrs):
         city = attrs.get("city")
