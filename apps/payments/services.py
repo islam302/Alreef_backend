@@ -123,7 +123,7 @@ def _redact(raw):
 
 @transaction.atomic
 def create_payment_for_order(
-    *, order, provider_code: str, method: str, idempotency_key: str = ""
+    *, order, provider_code: str, method: str, idempotency_key: str = "", amount=None, metadata=None
 ) -> Payment:
     """
     Create the Payment row, then ask the gateway to start the payment.
@@ -142,13 +142,16 @@ def create_payment_for_order(
         if existing:
             return existing
 
+    # `amount` is for an order paid in parts — a COD deposit and the rest on
+    # delivery. Every other payment is for the whole order.
     payment = Payment(
         order=order,
         provider=provider_code,
         method=method,
-        amount=order.grand_total,
+        amount=amount if amount is not None else order.grand_total,
         status=PaymentStatus.PENDING,
         idempotency_key=idempotency_key or "",
+        metadata=dict(metadata or {}),
     )
     payment.merchant_reference = _new_merchant_reference(order)
     try:
@@ -282,10 +285,20 @@ def mark_payment_captured(
         _flag_for_refund(payment, "Paid after the order was cancelled.")
         return payment
 
-    from apps.checkout.services import confirm_order_after_payment
+    from apps.checkout.services import confirm_order, confirm_order_after_payment
 
-    confirm_order_after_payment(order)
+    if is_deposit(payment):
+        # The deposit is what a COD order waits for. It confirms the order, but
+        # the order is not paid — the rest is collected on delivery — so no
+        # "payment received" email for the whole total.
+        confirm_order(order, payment_received=False)
+    else:
+        confirm_order_after_payment(order)
     return payment
+
+
+def is_deposit(payment: Payment) -> bool:
+    return (payment.metadata or {}).get("role") == "deposit"
 
 
 def _flag_for_refund(payment: Payment, reason: str) -> None:
@@ -472,6 +485,20 @@ def record_manual_receipt(payment: Payment, *, actor=None, note: str = ""):
         },
     )
     return payment
+
+
+def assert_staff_may_record_receipt(payment: Payment) -> None:
+    """
+    Cash is collected at the door, so a person may not record it before the
+    order is delivered. Marking it earlier said the shop held money it never
+    had, and a cancellation afterwards left it "captured" with nothing to
+    refund. Delivery records the collection itself; this guards the button.
+    """
+    if payment.provider == "cod" and payment.order.delivered_at is None:
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_INVALID_STATE,
+            "Cash on delivery is recorded when the order is delivered, not before.",
+        )
 
 
 @transaction.atomic
@@ -1197,7 +1224,10 @@ def assert_customer_may_cancel(order) -> None:
             ErrorCodes.ORDER_PAYMENT_IN_PROGRESS,
             "Your payment is still being confirmed. Please wait a few minutes before cancelling.",
         )
-    if any(p.status in payment_state.SETTLED and _is_gateway(p.provider) for p in payments):
+    # Money already with us, by gateway or by a transfer somebody confirmed
+    # (InstaPay, Vodafone Cash, a COD deposit): cancelling means a refund, and
+    # a person does that. Cash on delivery is only ever settled on delivery.
+    if any(p.status in payment_state.SETTLED and p.provider != "cod" for p in payments):
         raise ApplicationError(
             ErrorCodes.ORDER_ALREADY_PAID,
             "This order is already paid. Contact us to cancel it and get your money back.",
@@ -1205,6 +1235,9 @@ def assert_customer_may_cancel(order) -> None:
 
 
 def flag_paid_cancellation(order) -> None:
+    # Every settled payment but cash on delivery: a confirmed InstaPay or
+    # Vodafone Cash transfer — a deposit included — is money we hold too, and
+    # used to be left unflagged when the order was cancelled.
     for payment in order.payments.filter(status__in=payment_state.SETTLED):
-        if _is_gateway(payment.provider) and not payment.metadata.get("needs_refund"):
+        if payment.provider != "cod" and not payment.metadata.get("needs_refund"):
             _flag_for_refund(payment, "Order cancelled after it was paid.")

@@ -33,3 +33,11 @@ CACHES = {  # noqa: F405
 }
 
 MEDIA_ROOT = BASE_DIR / "test_media"  # noqa: F405
+
+# The COD deposit is off unless a test asks for it (tests/test_cod_deposit.py).
+# Most payment tests place a COD order through checkout and relabel its payment
+# onto the gateway under test; with a deposit that order would have two.
+PAYMENT_PROVIDERS = {  # noqa: F405
+    **PAYMENT_PROVIDERS,  # noqa: F405
+    "COD": {**PAYMENT_PROVIDERS["COD"], "DEPOSIT_AMOUNT": "0"},  # noqa: F405
+}

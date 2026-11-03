@@ -262,7 +262,8 @@ class ManualSettlementView(APIView):
         outcome = serializer.validated_data["outcome"]
         note = serializer.validated_data.get("note", "")
 
-        if outcome == "received":
+        if outcome in ("received", "collected"):
+            services.assert_staff_may_record_receipt(payment)
             payment = services.record_manual_receipt(payment, actor=request.user, note=note)
             message = "Payment recorded as received."
         else:

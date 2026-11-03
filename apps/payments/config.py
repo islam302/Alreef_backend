@@ -398,6 +398,43 @@ def cod_limits():
     )
 
 
+#: The manual transfer routes a COD deposit can be paid by:
+#: (provider code, settings block, setting that must be filled, payment method, label).
+DEPOSIT_ROUTE_SPECS = (
+    ("vodafone_cash", "VODAFONE_CASH", "NUMBER", "mobile_wallet", "فودافون كاش"),
+    ("instapay", "INSTAPAY", "ADDRESS", "instapay", "إنستاباي"),
+)
+
+
+def cod_deposit_amount():
+    """The deposit a COD order asks for, as a Decimal (0 when switched off)."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        amount = Decimal(str(provider_config("COD").get("DEPOSIT_AMOUNT", "0") or "0"))
+    except InvalidOperation:
+        return Decimal("0")
+    return amount if amount > 0 else Decimal("0")
+
+
+def deposit_routes() -> list:
+    """
+    The transfer routes a deposit can be sent by right now, in display order:
+    `[{"code", "method", "label_ar"}]`. Empty means no deposit can be taken, and
+    then none is asked for — a COD order works as it did before deposits.
+    """
+    routes = []
+    for code, key, required, method, label in DEPOSIT_ROUTE_SPECS:
+        config = provider_config(key)
+        if config.get("ENABLED") and str(config.get(required) or "").strip():
+            routes.append({"code": code, "method": method, "label_ar": label})
+    return routes
+
+
+def cod_deposit_required() -> bool:
+    return cod_deposit_amount() > 0 and bool(deposit_routes())
+
+
 def cod_allowed_shipping_method_ids():
     """
     Shipping methods COD may be combined with, or `None` for "any".

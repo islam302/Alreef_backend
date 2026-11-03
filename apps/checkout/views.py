@@ -120,6 +120,7 @@ class CheckoutCreateView(IdempotentRequestMixin, APIView):
             # retry that outlives the cache still unable to charge twice.
             idempotency_key=request.headers.get("Idempotency-Key", ""),
             contact_email=contact_email,
+            deposit_route=data.get("deposit_route", ""),
         )
 
         # Deliberately narrow. The storefront gets what it needs to send the
@@ -131,6 +132,8 @@ class CheckoutCreateView(IdempotentRequestMixin, APIView):
             "provider": payment.provider,
             "method": payment.method,
             "status": payment.status,
+            # What this payment is for: the whole order, or just the deposit.
+            "amount": str(payment.amount.amount),
             "redirect_url": payment.metadata.get("redirect_url", ""),
             "iframe_url": payment.metadata.get("iframe_url", ""),
             "provider_reference": payment.provider_reference,
@@ -141,6 +144,10 @@ class CheckoutCreateView(IdempotentRequestMixin, APIView):
             "pay_to": payment.metadata.get("instapay_address") or payment.metadata.get("wallet_number", ""),
             "pay_to_name": payment.metadata.get("wallet_account_name") or payment.metadata.get("instapay_account_name", ""),
             "pay_reference": payment.metadata.get("transfer_reference", order.order_number),
+            # A COD deposit: this payment is the deposit, and the rest is paid
+            # to the courier.
+            "role": payment.metadata.get("role", ""),
+            "due_on_delivery": payment.metadata.get("due_on_delivery", ""),
         }
         body = {"order": OrderDetailSerializer(order).data, "payment": payment_data}
         if order.user_id is None:

@@ -595,9 +595,15 @@ def test_staff_can_record_a_cod_collection(
 ):
     from apps.payments.models import PaymentStatus
 
+    from django.utils import timezone
+
+    from apps.orders.models import Order
+
     payment = _cod_payment_for(
         authenticated_client, product_with_variant_and_stock, address, shipping_setup
     )
+    # Cash is collected at the door: the order has been delivered.
+    Order.objects.filter(pk=payment.order_id).update(delivered_at=timezone.now())
 
     response = staff_client.post(
         f"/api/v1/payments/{payment.id}/settle/",
@@ -608,6 +614,27 @@ def test_staff_can_record_a_cod_collection(
     assert response.status_code == 200
     payment.refresh_from_db()
     assert payment.status == PaymentStatus.CAPTURED
+
+
+def test_staff_cannot_record_cod_cash_before_delivery(
+    staff_client, authenticated_client, product_with_variant_and_stock, address, shipping_setup
+):
+    """
+    Recording it early said the shop held cash it never had, and a cancellation
+    afterwards left the payment captured with nothing to refund.
+    """
+    from apps.payments.models import PaymentStatus
+
+    payment = _cod_payment_for(
+        authenticated_client, product_with_variant_and_stock, address, shipping_setup
+    )
+    for url in (f"/api/v1/payments/{payment.id}/settle/", f"/api/v1/admin-api/payments/{payment.id}/settle/"):
+        for outcome in ("received", "collected"):
+            response = staff_client.post(url, {"outcome": outcome}, format="json")
+            assert response.status_code == 409, (url, outcome, response.status_code)
+
+    payment.refresh_from_db()
+    assert payment.status == PaymentStatus.PENDING
 
 
 def test_payment_methods_endpoint_is_public_and_leaks_no_configuration(api_client):

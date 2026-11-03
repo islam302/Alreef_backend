@@ -32,6 +32,10 @@ class CheckoutTotals:
     grand_total: Money
     applied_promotions: list = field(default_factory=list)
     free_shipping: bool = False
+    #: COD only, when a deposit is asked for: paid now by transfer, and what
+    #: the courier then collects. Both None otherwise.
+    deposit: Money | None = None
+    due_on_delivery: Money | None = None
 
 
 def tax_rate_for_product(product) -> Decimal:
@@ -159,17 +163,24 @@ def calculate_totals(
 
     grand_total = discounted_subtotal + tax_total + shipping_total + cod_fee
 
+    deposit = due_on_delivery = None
+    if payment_method == PaymentMethodSnapshot.COD and payment_config.cod_deposit_required():
+        # Part of the total, not on top of it: never more than the order is worth.
+        deposit = Money(min(payment_config.cod_deposit_amount(), grand_total.amount), currency)
+        due_on_delivery = grand_total - deposit
+
     return CheckoutTotals(
         subtotal=subtotal, coupon_discount=coupon_discount, promotion_discount=promotion_discount,
         tax_total=tax_total, shipping_total=shipping_total, cod_fee=cod_fee, grand_total=grand_total,
         applied_promotions=applied_promotions, free_shipping=promo_free_shipping,
+        deposit=deposit, due_on_delivery=due_on_delivery,
     )
 
 
 @transaction.atomic
 def create_order_from_cart(
     *, user, cart, address, shipping_method_id, payment_method: str, coupon_code: str = "",
-    notes: str = "", idempotency_key: str = "", contact_email: str = "",
+    notes: str = "", idempotency_key: str = "", contact_email: str = "", deposit_route: str = "",
 ):
     """
     Turn the cart into an Order and start its payment.
@@ -299,6 +310,8 @@ def create_order_from_cart(
             provider_code=provider_code,
             method=payment_method,
             idempotency_key=idempotency_key,
+            # With a deposit, the courier collects only what is left.
+            amount=totals.due_on_delivery,
         )
     except NotImplementedError as exc:
         # A disabled or unconfigured gateway. The adapter's message names our
@@ -323,6 +336,13 @@ def create_order_from_cart(
     cart.status = CartStatus.CONVERTED
     cart.save(update_fields=["status"])
 
+    if payment_method == PaymentMethodSnapshot.COD and totals.deposit is not None:
+        # The order waits, pending, for its deposit. Staff confirm the transfer
+        # in the dashboard (record_manual_receipt), and that confirms the order.
+        deposit = _create_deposit(order, totals, route=deposit_route, idempotency_key=idempotency_key)
+        _email_transfer_details(order, deposit)
+        return order, deposit
+
     if payment_method == PaymentMethodSnapshot.COD:
         # A COD order is confirmed but NOT paid. It used to be captured right
         # here, which said the money was ours before a courier had left the
@@ -341,6 +361,55 @@ def create_order_from_cart(
 
 #: Routes where the customer sends the money themselves and a person confirms it.
 TRANSFER_ROUTES = ("instapay", "vodafone_cash")
+
+
+def _create_deposit(order, totals, *, route: str, idempotency_key: str):
+    """
+    The COD deposit: a transfer for `totals.deposit` on the route the customer
+    chose (or the first one configured), with its own idempotency key so a
+    retried checkout finds it instead of asking for a second deposit.
+    """
+    from apps.payments import config as payment_config
+    from apps.payments.services import create_payment_for_order
+
+    routes = payment_config.deposit_routes()
+    chosen = next((r for r in routes if r["code"] == route), None) if route else (routes[0] if routes else None)
+    if chosen is None:
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_METHOD_NOT_AVAILABLE,
+            "That way of paying the deposit is not available. Please choose another.",
+        )
+    try:
+        deposit = create_payment_for_order(
+            order=order,
+            provider_code=chosen["code"],
+            method=chosen["method"],
+            idempotency_key=f"{idempotency_key}:deposit" if idempotency_key else "",
+            amount=totals.deposit,
+            metadata={"role": "deposit", "due_on_delivery": str(totals.due_on_delivery.amount)},
+        )
+    except NotImplementedError as exc:
+        logger.warning("checkout: deposit route '%s' unavailable: %s", chosen["code"], exc)
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+            "The deposit cannot be paid that way at the moment. Please choose another.",
+        ) from exc
+
+    # Said in the customer's terms: this is the deposit, and this is what is
+    # left for the courier.
+    metadata = deposit.metadata or {}
+    pay_to = metadata.get("wallet_number") or metadata.get("instapay_address", "")
+    rest = totals.due_on_delivery.amount
+    deposit.metadata = {
+        **metadata,
+        "instructions_ar": (
+            f"عشان نأكد طلبك، حوّل عربون {totals.deposit.amount:.2f} ج.م {chosen['label_ar']} على {pay_to}، "
+            f"واكتب رقم الطلب {order.order_number} في رسالة التحويل. "
+            f"الباقي {rest:.2f} ج.م بتدفعه للمندوب وقت الاستلام."
+        ),
+    }
+    deposit.save(update_fields=["metadata"])
+    return deposit
 
 
 def _email_transfer_details(order, payment):
@@ -367,6 +436,8 @@ def _email_transfer_details(order, payment):
             "amount": metadata.get("transfer_amount") or str(payment.amount.amount),
             "reference": metadata.get("transfer_reference", order.order_number),
             "confirm_window_hours": metadata.get("confirm_window_hours", 24),
+            # A COD deposit: what the courier collects afterwards.
+            "due_on_delivery": metadata.get("due_on_delivery", "") if metadata.get("role") == "deposit" else "",
         },
         event="order_created",
         user_id=order.user_id,

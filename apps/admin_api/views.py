@@ -779,7 +779,11 @@ class AdminPaymentViewSet(ReadOnlyEnvelopeViewSet):
         InstaPay it is the only thing that will ever confirm the payment, and the
         order is not fulfilled until it runs.
         """
-        from apps.payments.services import record_manual_receipt, record_manual_refusal
+        from apps.payments.services import (
+            assert_staff_may_record_receipt,
+            record_manual_receipt,
+            record_manual_refusal,
+        )
 
         payment = self.get_object()
         outcome = str(request.data.get("outcome") or "").strip()
@@ -787,6 +791,7 @@ class AdminPaymentViewSet(ReadOnlyEnvelopeViewSet):
 
         # "collected" is the natural word for cash and is accepted as a synonym.
         if outcome in ("received", "collected"):
+            assert_staff_may_record_receipt(payment)
             payment = record_manual_receipt(payment, actor=request.user, note=note)
             message = "Payment recorded as received."
         elif outcome == "refused":

@@ -13,6 +13,8 @@ overwritten), and `seed_content` creates them on a fresh installation. Once
 created they belong to the dashboard — edit them there, not here.
 """
 
+from django.db.models import F
+
 BUSINESS = "شركة الريف للمواد الغذائية (عسل نحل الريف)"
 ADDRESS = "طريق طنطا–المحلة أمام محطة قطار حصة شبشير، طنطا، محافظة الغربية، مصر"
 PHONE = "+20 15 54112325"
@@ -54,6 +56,16 @@ PRIVACY = {
     ],
 }
 
+#: Added to the refund policy when COD deposits were introduced (migration 0006
+#: appends it to a policy that already exists).
+DEPOSIT_SECTION = (
+    "العربون في الدفع عند الاستلام",
+    "لو اخترت الدفع عند الاستلام، ممكن نطلب عربون بسيط بتحوّله فودافون كاش أو إنستاباي عشان نأكد الطلب. المبلغ بيظهرلك قبل ما تأكد، "
+    "وبيتخصم من إجمالي الطلب — يعني المندوب بياخد الباقي بس، ومفيش أي مبلغ زيادة.\n\n"
+    "لو لغيت الطلب قبل ما يتشحن، أو اتلغى من عندنا، العربون بيرجعلك كامل بنفس الطريقة اللي حوّلت بيها خلال 7 أيام. "
+    "ولو المنتج رجع حسب السياسة دي، العربون بيرجع مع باقي المبلغ.",
+)
+
 REFUND = {
     "slug": "refund-policy",
     "title_ar": "سياسة الاسترجاع والإلغاء",
@@ -67,6 +79,7 @@ REFUND = {
         ("استرجاع منتج", "تقدر تطلب استرجاع أي منتج خلال 14 يوم من تاريخ الاستلام.\n\nعشان صحتك وسلامة الأكل: المنتج اللي اتفتح أو اتكسر ختمه أو استُخدم مش بيترجع، إلا لو كان فيه عيب. لازم يرجع في عبوته وتغليفه الأصلي."),
         ("لو المنتج وصلك فيه مشكلة", "لو الطلب وصلك مكسور، أو منتج غير اللي طلبته، أو ناقص، أو منتهي الصلاحية، أو فيه عيب في الجودة: ابعتلنا رقم الطلب وصورة للمنتج والعبوة في أسرع وقت بعد الاستلام.\n\nبعد ما نراجع، بنبعتلك بديل أو نرجّعلك المبلغ كامل حسب اختيارك، ومصاريف الشحن والإرجاع في الحالة دي علينا."),
         ("لو غيّرت رأيك", "لو المنتج سليم ومقفول وعايز ترجّعه، تقدر خلال الـ14 يوم. مصاريف شحن الإرجاع في الحالة دي على العميل، وبنرجّعلك تمن المنتج بعد ما يوصلنا ونتأكد إنه بحالته."),
+        DEPOSIT_SECTION,
         ("إزاي تطلب استرجاع", "• لو عندك حساب: من «طلباتي» افتح الطلب واختار «طلب استرجاع» واكتب السبب.\n• أو ابعتلنا على الواتساب أو الإيميل رقم الطلب وسبب الاسترجاع وصورة المنتج.\n\nفريقنا بيراجع الطلب ويرد عليك بالخطوات وميعاد استلام المنتج."),
         ("رد الفلوس", "بنرجّع المبلغ خلال 7 أيام من استلامنا المنتج المرتجع أو موافقتنا على الطلب.\n\n• الدفع عند الاستلام: بنحوّلك المبلغ على محفظة إلكترونية أو إنستاباي أو حساب بنكي باسمك.\n• الدفع بالكارت: المبلغ بيرجع على نفس الكارت، وظهوره في حسابك ممكن ياخد وقت إضافي حسب البنك.\n• المحافظ الإلكترونية وإنستاباي: بيرجع على نفس المحفظة أو الحساب اللي دفعت منه.\n\nولو تحب، ممكن نحطلك المبلغ رصيد في حسابك تستخدمه في طلب جاي."),
         ("تواصل معانا", _CONTACT),
@@ -92,6 +105,24 @@ SHIPPING = {
 }
 
 POLICY_PAGES = (PRIVACY, REFUND, SHIPPING)
+
+
+def add_deposit_section(Page, PageSection):
+    """Append the deposit rules to an existing refund policy, once. Returns True if added."""
+    page = Page.objects.filter(slug="refund-policy").first()
+    title, body = DEPOSIT_SECTION
+    if page is None or page.sections.filter(title=title).exists():
+        return False
+    # Before "how to request a return" when it is still there; otherwise last.
+    anchor = page.sections.filter(title="إزاي تطلب استرجاع").first()
+    if anchor is not None:
+        page.sections.filter(sort_order__gte=anchor.sort_order).update(sort_order=F("sort_order") + 1)
+        order = anchor.sort_order
+    else:
+        last = page.sections.order_by("-sort_order").first()
+        order = (last.sort_order + 1) if last else 0
+    PageSection.objects.create(page=page, kind="text", title=title, body=body, sort_order=order, is_active=True)
+    return True
 
 
 def create_missing(Page, PageSection, email=""):

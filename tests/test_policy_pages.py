@@ -67,3 +67,19 @@ def test_the_promises_match_the_system():
     default = ReturnPolicySettings._meta.get_field("return_window_days").default
     refund = next(p for p in POLICY_PAGES if p["slug"] == "refund-policy")
     assert f"{default} يوم" in " ".join(body for _, body in refund["sections"])
+
+
+@pytest.mark.django_db
+def test_the_deposit_rules_are_added_to_an_existing_refund_policy_once():
+    from apps.content.policy_pages import DEPOSIT_SECTION, add_deposit_section
+
+    Page.objects.filter(slug__in=SLUGS).delete()
+    create_missing(Page, PageSection)
+    page = Page.objects.get(slug="refund-policy")
+    page.sections.filter(title=DEPOSIT_SECTION[0]).delete()  # a policy created before deposits
+
+    assert add_deposit_section(Page, PageSection) is True
+    assert add_deposit_section(Page, PageSection) is False
+    titles = list(page.sections.order_by("sort_order").values_list("title", flat=True))
+    assert titles.count(DEPOSIT_SECTION[0]) == 1
+    assert titles.index(DEPOSIT_SECTION[0]) == titles.index("إزاي تطلب استرجاع") - 1

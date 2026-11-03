@@ -569,6 +569,10 @@ PAYMENT_PROVIDERS = {
         # Comma-separated ShippingMethod ids. Empty means any method, which is
         # right until a carrier that will not handle cash is added.
         "ALLOWED_SHIPPING_METHOD_IDS": config("COD_ALLOWED_SHIPPING_METHOD_IDS", default=""),
+        # Paid up front by Vodafone Cash or InstaPay before a COD order is
+        # confirmed, and taken off what the courier collects. Asked for only
+        # while one of those two routes is configured; 0 switches it off.
+        "DEPOSIT_AMOUNT": config("COD_DEPOSIT_AMOUNT", default="100.00"),
     },
 }
 

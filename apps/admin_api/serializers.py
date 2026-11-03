@@ -89,6 +89,9 @@ SAFE_PAYMENT_METADATA_KEYS = (
     # the extra gateway transactions behind it. Shown so staff refund it.
     "needs_refund",
     "needs_refund_reason",
+    # A COD deposit, and what the courier collects after it.
+    "role",
+    "due_on_delivery",
     "duplicate_charges",
     "captured_transaction",
     "currency",
@@ -120,6 +123,11 @@ class AdminPaymentSerializer(serializers.ModelSerializer):
     #: Whether this gateway can be asked what really happened.
     reconcilable = serializers.SerializerMethodField()
     metadata = serializers.SerializerMethodField()
+    #: Cash on delivery is recorded only once the order is delivered, so the
+    #: dashboard offers that button only then.
+    order_delivered = serializers.SerializerMethodField()
+    #: A COD deposit (role "deposit") rather than a payment for the whole order.
+    is_deposit = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
@@ -127,8 +135,14 @@ class AdminPaymentSerializer(serializers.ModelSerializer):
             "id", "order", "order_number", "provider", "method", "amount", "status",
             "provider_reference", "merchant_reference", "failure_reason", "expires_at",
             "metadata", "refunds", "transactions", "refundable", "refund_note",
-            "refundable_amount", "reconcilable", "created_at", "updated_at",
+            "refundable_amount", "reconcilable", "order_delivered", "is_deposit", "created_at", "updated_at",
         ]
+
+    def get_order_delivered(self, obj) -> bool:
+        return obj.order.delivered_at is not None
+
+    def get_is_deposit(self, obj) -> bool:
+        return (obj.metadata or {}).get("role") == "deposit"
 
     def get_refunds(self, obj) -> list:
         return AdminRefundSerializer(obj.refunds.all(), many=True).data

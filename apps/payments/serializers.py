@@ -32,6 +32,27 @@ class PaymentMethodSerializer(serializers.Serializer):
         fee, _minimum, _maximum = cod_limits()
         return str(fee)
 
+    deposit_amount = serializers.SerializerMethodField()
+    deposit_routes = serializers.SerializerMethodField()
+
+    def get_deposit_amount(self, spec) -> str | None:
+        """COD only: what is transferred up front, or null when no deposit is asked for."""
+        if spec.method != "cod":
+            return None
+        from apps.payments.config import cod_deposit_amount, cod_deposit_required
+
+        return str(cod_deposit_amount()) if cod_deposit_required() else None
+
+    def get_deposit_routes(self, spec) -> list:
+        """COD only: how the deposit can be sent, `[{code, label_ar}]`."""
+        if spec.method != "cod":
+            return []
+        from apps.payments.config import cod_deposit_required, deposit_routes
+
+        if not cod_deposit_required():
+            return []
+        return [{"code": r["code"], "label_ar": r["label_ar"]} for r in deposit_routes()]
+
 
 class ManualSettlementSerializer(serializers.Serializer):
     """

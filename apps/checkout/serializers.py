@@ -13,6 +13,9 @@ class CheckoutInputSerializer(serializers.Serializer):
     payment_method = serializers.ChoiceField(choices=PaymentMethodSnapshot.choices)
     coupon_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    # COD with a deposit: how the deposit is sent. Blank picks the first
+    # configured route; ignored for every other payment method.
+    deposit_route = serializers.ChoiceField(choices=["vodafone_cash", "instapay"], required=False, allow_blank=True, default="")
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +69,9 @@ class GuestCheckoutInputSerializer(serializers.Serializer):
     payment_method = serializers.ChoiceField(choices=PaymentMethodSnapshot.choices)
     coupon_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    # COD with a deposit: how the deposit is sent. Blank picks the first
+    # configured route; ignored for every other payment method.
+    deposit_route = serializers.ChoiceField(choices=["vodafone_cash", "instapay"], required=False, allow_blank=True, default="")
 
     def build_address(self) -> Address:
         """An unsaved Address: what checkout reads, with nobody to own it."""
@@ -103,6 +109,15 @@ class CheckoutTotalsSerializer(serializers.Serializer):
     grand_total = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
     free_shipping = serializers.BooleanField()
+    #: COD with a deposit: transferred now, and collected by the courier. Null otherwise.
+    deposit_amount = serializers.SerializerMethodField()
+    due_on_delivery = serializers.SerializerMethodField()
+
+    def get_deposit_amount(self, obj) -> str | None:
+        return str(obj.deposit.amount) if obj.deposit is not None else None
+
+    def get_due_on_delivery(self, obj) -> str | None:
+        return str(obj.due_on_delivery.amount) if obj.due_on_delivery is not None else None
 
     def get_subtotal(self, obj):
         return str(obj.subtotal.amount)

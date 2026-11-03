@@ -127,3 +127,32 @@ order holds no money to give back.
 COD is excluded from `reconcile_pending_payments_task`, as before, and now for a
 stated reason: its `get_status` returns our own record, so polling it cannot learn
 anything. COD payments resolve by staff action, not by asking a provider.
+
+## Deposit
+
+A COD order can ask for a deposit before it is confirmed: `COD_DEPOSIT_AMOUNT`
+(default `100.00`; `0` switches it off), sent by Vodafone Cash or InstaPay.
+
+- **Asked for only while a transfer route works.** With neither
+  `VODAFONE_CASH_*` nor `INSTAPAY_*` configured, no deposit is asked for and COD
+  behaves as it always did — so turning the feature on is filling in a wallet
+  number, not a code change.
+- **Part of the total, not on top of it.** The order has two payments: the
+  deposit (`metadata.role = "deposit"`, provider `vodafone_cash` or `instapay`)
+  and the COD payment for what is left. They add up to `grand_total`; the
+  courier collects only the second. Never more than the order is worth.
+- **The order waits.** It stays `pending` until staff confirm the deposit in the
+  dashboard (Payments → confirm received). That confirms the order — with the
+  "order confirmed" email, not a "payment received" one, since the rest is still
+  to be collected. Refused or never sent: the order stays pending until a person
+  cancels it, like any transfer.
+- **Cancelling after the deposit arrived** flags it `needs_refund`, and the
+  customer can no longer cancel it themselves (a person refunds it).
+- **Checkout:** `GET /payments/methods/` gives `deposit_amount` and
+  `deposit_routes` on the COD entry; `/checkout/summary/` returns
+  `deposit_amount` and `due_on_delivery`; `POST /checkout/` takes an optional
+  `deposit_route` and returns the deposit as `payment` (with `role` and
+  `due_on_delivery`), so the confirmation shows where to send it.
+
+Cash itself is recorded only on delivery: the settle endpoints refuse a COD
+receipt for an order that has not been delivered.

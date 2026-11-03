@@ -101,6 +101,12 @@ class Command(BaseCommand):
             zone=rest_of_egypt, method=standard,
             defaults={"calculation_type": RateCalculationType.FLAT, "base_price": Money(65, "EGP"), "free_shipping_threshold": Money(1500, "EGP")},
         )
+        # The shop's fees (Standard 75, Express 100, everywhere) over the
+        # zones above; the free-shipping thresholds stay.
+        from apps.shipping.defaults import apply_default_fees
+        from apps.shipping.models import Governorate
+
+        apply_default_fees(Governorate, ShippingZone, ShippingMethod, ShippingRate)
 
     def _seed_categories(self):
         names = [

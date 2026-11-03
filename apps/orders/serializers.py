@@ -43,9 +43,16 @@ def payment_summary(order):
     and what to quote — so a customer who closed the confirmation page can still
     pay from their order page. Nothing secret, and never the provider's payload.
     """
-    payment = order.payments.order_by("-created_at").first()
-    if payment is None:
+    payments = list(order.payments.order_by("-created_at"))
+    if not payments:
         return None
+    # A COD order with a deposit has two payments. The one the customer still
+    # has to act on (the deposit transfer) comes first; once it is in, the
+    # cash-on-delivery part is what is left to show.
+    payment = next((p for p in payments if p.status == "requires_action"), payments[0])
+    if (payment.metadata or {}).get("role") == "deposit" and payment.status != "requires_action":
+        payment = next((p for p in payments if p.provider == "cod"), payment)
+    deposit = next((p for p in payments if (p.metadata or {}).get("role") == "deposit"), None)
     metadata = payment.metadata or {}
     return {
         "id": payment.id,
@@ -59,6 +66,17 @@ def payment_summary(order):
         "pay_to": metadata.get("instapay_address") or metadata.get("wallet_number", ""),
         "pay_to_name": metadata.get("wallet_account_name") or metadata.get("instapay_account_name", ""),
         "pay_reference": metadata.get("transfer_reference", order.order_number),
+        "role": metadata.get("role", ""),
+        # The deposit, whichever payment is shown: how much, and whether it is in.
+        "deposit": (
+            {
+                "amount": str(deposit.amount.amount),
+                "status": deposit.status,
+                "due_on_delivery": (deposit.metadata or {}).get("due_on_delivery", ""),
+            }
+            if deposit is not None
+            else None
+        ),
     }
 
 
