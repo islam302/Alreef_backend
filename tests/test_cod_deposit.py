@@ -89,7 +89,7 @@ def test_a_cod_order_waits_for_its_deposit(deposit_on, product_with_variant_and_
     assert payment["role"] == "deposit"
     assert payment["pay_to"] == "01012345678"  # the wallet number, normalised
     assert Decimal(payment["due_on_delivery"]) == cod.amount.amount
-    assert "عربون 100.00" in payment["instructions_ar"]
+    assert "دفعة تأكيد 100.00" in payment["instructions_ar"]
 
 
 def test_the_customer_picks_instapay(deposit_on, product_with_variant_and_stock, governorate, shipping_setup):

@@ -59,6 +59,16 @@ PRIVACY = {
 #: Added to the refund policy when COD deposits were introduced (migration 0006
 #: appends it to a policy that already exists).
 DEPOSIT_SECTION = (
+    "دفعة تأكيد الطلب في الدفع عند الاستلام",
+    "لو اخترت الدفع عند الاستلام، ممكن نطلب دفعة تأكيد بسيطة بتحوّلها فودافون كاش أو إنستاباي عشان نأكد الطلب. المبلغ بيظهرلك قبل ما تأكد، "
+    "وبيتخصم من إجمالي الطلب — يعني بتدفع الباقي بس عند الاستلام، ومفيش أي مبلغ زيادة.\n\n"
+    "لو لغيت الطلب قبل ما يتشحن، أو اتلغى من عندنا، دفعة التأكيد بترجعلك كاملة بنفس الطريقة اللي حوّلت بيها خلال 7 أيام. "
+    "ولو المنتج رجع حسب السياسة دي، دفعة التأكيد بترجع مع باقي المبلغ.",
+)
+
+#: The section as migration 0006 first wrote it, before "عربون" became "دفعة
+#: التأكيد". Migration 0007 rewrites it only while it still reads exactly so.
+DEPOSIT_SECTION_V1 = (
     "العربون في الدفع عند الاستلام",
     "لو اخترت الدفع عند الاستلام، ممكن نطلب عربون بسيط بتحوّله فودافون كاش أو إنستاباي عشان نأكد الطلب. المبلغ بيظهرلك قبل ما تأكد، "
     "وبيتخصم من إجمالي الطلب — يعني المندوب بياخد الباقي بس، ومفيش أي مبلغ زيادة.\n\n"
@@ -123,6 +133,21 @@ def add_deposit_section(Page, PageSection):
         order = (last.sort_order + 1) if last else 0
     PageSection.objects.create(page=page, kind="text", title=title, body=body, sort_order=order, is_active=True)
     return True
+
+
+def rename_deposit_section(Page, PageSection):
+    """
+    Rewrite the first wording of the deposit section in the current one.
+
+    Only a section that still reads exactly as first written is touched: one
+    the team has edited from the dashboard is theirs and is left alone.
+    Returns True if it was rewritten.
+    """
+    old_title, old_body = DEPOSIT_SECTION_V1
+    title, body = DEPOSIT_SECTION
+    return bool(
+        PageSection.objects.filter(page__slug="refund-policy", title=old_title, body=old_body).update(title=title, body=body)
+    )
 
 
 def create_missing(Page, PageSection, email=""):

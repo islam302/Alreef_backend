@@ -403,9 +403,9 @@ def _create_deposit(order, totals, *, route: str, idempotency_key: str):
     deposit.metadata = {
         **metadata,
         "instructions_ar": (
-            f"عشان نأكد طلبك، حوّل عربون {totals.deposit.amount:.2f} ج.م {chosen['label_ar']} على {pay_to}، "
+            f"عشان نأكد طلبك، حوّل دفعة تأكيد {totals.deposit.amount:.2f} ج.م {chosen['label_ar']} على {pay_to}، "
             f"واكتب رقم الطلب {order.order_number} في رسالة التحويل. "
-            f"الباقي {rest:.2f} ج.م بتدفعه للمندوب وقت الاستلام."
+            f"الباقي {rest:.2f} ج.م بتدفعه عند الاستلام."
         ),
     }
     deposit.save(update_fields=["metadata"])

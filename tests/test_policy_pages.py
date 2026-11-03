@@ -83,3 +83,25 @@ def test_the_deposit_rules_are_added_to_an_existing_refund_policy_once():
     titles = list(page.sections.order_by("sort_order").values_list("title", flat=True))
     assert titles.count(DEPOSIT_SECTION[0]) == 1
     assert titles.index(DEPOSIT_SECTION[0]) == titles.index("إزاي تطلب استرجاع") - 1
+
+
+@pytest.mark.django_db
+def test_the_first_deposit_wording_is_rewritten_but_an_edited_one_is_kept():
+    from apps.content.policy_pages import DEPOSIT_SECTION, DEPOSIT_SECTION_V1, rename_deposit_section
+
+    Page.objects.filter(slug__in=SLUGS).delete()
+    create_missing(Page, PageSection)
+    section = PageSection.objects.get(page__slug="refund-policy", title=DEPOSIT_SECTION[0])
+
+    section.title, section.body = DEPOSIT_SECTION_V1
+    section.save()
+    assert rename_deposit_section(Page, PageSection) is True
+    section.refresh_from_db()
+    assert (section.title, section.body) == DEPOSIT_SECTION
+
+    # Edited by the team: theirs, left alone.
+    section.title, section.body = DEPOSIT_SECTION_V1[0], "نص كتبه الفريق"
+    section.save()
+    assert rename_deposit_section(Page, PageSection) is False
+    section.refresh_from_db()
+    assert section.body == "نص كتبه الفريق"
