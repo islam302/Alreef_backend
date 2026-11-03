@@ -207,8 +207,11 @@ class ReturnItem(BaseModel):
 class ReturnPolicySettings(BaseModel):
     """Admin-configurable return policy (spec §39) — never hard-code legal rules in code."""
 
-    return_window_days = models.PositiveIntegerField(default=14)
-    allow_change_of_mind_returns = models.BooleanField(default=True)
+    #: Days after delivery a defective or spoiled product can come back (Egyptian
+    #: Consumer Protection Law 181/2018 gives 30 for a defect).
+    return_window_days = models.PositiveIntegerField(default=30)
+    #: Food: a sound product is not taken back because the customer changed their mind.
+    allow_change_of_mind_returns = models.BooleanField(default=False)
     require_approval = models.BooleanField(default=True)
 
     class Meta:

@@ -57,16 +57,20 @@ def test_policies_are_public(api_client):
     res = api_client.get("/api/v1/content/pages/refund-policy/")
     assert res.status_code == 200
     body = " ".join(s["body"] for s in res.json()["data"]["sections"])
-    assert "14 يوم" in body and "7 أيام" in body
+    assert "30 يوم" in body and "7 أيام" in body
+    assert "14 يوم" not in body
 
 
 def test_the_promises_match_the_system():
-    """The refund policy states the 14-day window ReturnPolicySettings defaults to."""
+    """The refund policy states the window ReturnPolicySettings defaults to, and no change-of-mind returns."""
     from apps.orders.models import ReturnPolicySettings
 
     default = ReturnPolicySettings._meta.get_field("return_window_days").default
     refund = next(p for p in POLICY_PAGES if p["slug"] == "refund-policy")
-    assert f"{default} يوم" in " ".join(body for _, body in refund["sections"])
+    text = " ".join(body for _, body in refund["sections"])
+    assert f"{default} يوم" in text
+    assert not ReturnPolicySettings._meta.get_field("allow_change_of_mind_returns").default
+    assert "مفيش استرجاع لمنتج سليم لمجرد تغيير الرأي" in text
 
 
 @pytest.mark.django_db
@@ -87,7 +91,7 @@ def test_the_deposit_rules_are_added_to_an_existing_refund_policy_once():
 
 @pytest.mark.django_db
 def test_the_first_deposit_wording_is_rewritten_but_an_edited_one_is_kept():
-    from apps.content.policy_pages import DEPOSIT_SECTION, DEPOSIT_SECTION_V1, rename_deposit_section
+    from apps.content.policy_pages import DEPOSIT_SECTION, DEPOSIT_SECTION_V1, DEPOSIT_SECTION_V2, rename_deposit_section
 
     Page.objects.filter(slug__in=SLUGS).delete()
     create_missing(Page, PageSection)
@@ -97,7 +101,7 @@ def test_the_first_deposit_wording_is_rewritten_but_an_edited_one_is_kept():
     section.save()
     assert rename_deposit_section(Page, PageSection) is True
     section.refresh_from_db()
-    assert (section.title, section.body) == DEPOSIT_SECTION
+    assert (section.title, section.body) == DEPOSIT_SECTION_V2
 
     # Edited by the team: theirs, left alone.
     section.title, section.body = DEPOSIT_SECTION_V1[0], "نص كتبه الفريق"
@@ -105,3 +109,49 @@ def test_the_first_deposit_wording_is_rewritten_but_an_edited_one_is_kept():
     assert rename_deposit_section(Page, PageSection) is False
     section.refresh_from_db()
     assert section.body == "نص كتبه الفريق"
+
+
+
+def _publish_v2():
+    """The refund policy exactly as it was published before the food-returns rewrite."""
+    from apps.content.policy_pages import REFUND_SECTIONS_V2, REFUND_V2_META, contact_block
+
+    Page.objects.filter(slug__in=SLUGS).delete()
+    create_missing(Page, PageSection)
+    page = Page.objects.get(slug="refund-policy")
+    page.sections.all().delete()
+    page.meta_description = REFUND_V2_META
+    page.save()
+    for i, (title, body) in enumerate(REFUND_SECTIONS_V2):
+        PageSection.objects.create(
+            page=page, kind="text", title=title, sort_order=i, is_active=True,
+            body=contact_block("shop@example.com") if body == "{contact}" else body,
+        )
+    return page
+
+
+@pytest.mark.django_db
+def test_the_published_refund_policy_is_rewritten_for_food():
+    from apps.content.policy_pages import REFUND, rewrite_refund_policy_v3
+
+    page = _publish_v2()
+    assert rewrite_refund_policy_v3(Page, PageSection) is True
+    sections = list(page.sections.order_by("sort_order"))
+    assert [s.title for s in sections] == [t for t, _ in REFUND["sections"]]
+    text = " ".join(s.body for s in sections)
+    assert "خلال 14 يوم" not in text
+    assert "دفعة تأكيد الطلب مابترجعش" in text and "اعمل طلب جديد" in text
+    assert "shop@example.com" in sections[-1].body  # the contact section keeps what it said
+    page.refresh_from_db()
+    assert page.meta_description == REFUND["meta_description"]
+    assert rewrite_refund_policy_v3(Page, PageSection) is False  # once
+
+
+@pytest.mark.django_db
+def test_an_edited_refund_policy_is_not_rewritten():
+    from apps.content.policy_pages import rewrite_refund_policy_v3
+
+    page = _publish_v2()
+    page.sections.filter(title="رد الفلوس").update(body="نص كتبه المحامي")
+    assert rewrite_refund_policy_v3(Page, PageSection) is False
+    assert page.sections.get(title="رد الفلوس").body == "نص كتبه المحامي"

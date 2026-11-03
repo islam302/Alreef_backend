@@ -42,9 +42,9 @@ def test_create_return_request_within_window_succeeds(authenticated_client, deli
 
 
 def test_create_return_request_outside_policy_window_fails(authenticated_client, delivered_order):
-    ReturnPolicySettings.get_solo()  # ensure the row exists at its default 14-day window
+    ReturnPolicySettings.get_solo()  # ensure the row exists at its default 30-day window
     order_item = delivered_order.items.first()
-    delivered_order.delivered_at = timezone.now() - datetime.timedelta(days=30)
+    delivered_order.delivered_at = timezone.now() - datetime.timedelta(days=31)
     delivered_order.save(update_fields=["delivered_at"])
 
     response = authenticated_client.post(
@@ -119,3 +119,31 @@ def test_complete_return_and_refund_partial_amount_marks_order_partially_refunde
     assert result.status == ReturnRequestStatus.REFUNDED
     refund = payment.refunds.get()
     assert refund.amount == Money("250.00", "EGP")
+
+
+def test_a_defect_can_come_back_on_day_29(authenticated_client, delivered_order):
+    ReturnPolicySettings.get_solo()
+    order_item = delivered_order.items.first()
+    delivered_order.delivered_at = timezone.now() - datetime.timedelta(days=29)
+    delivered_order.save(update_fields=["delivered_at"])
+
+    response = authenticated_client.post(
+        _returns_create_url(delivered_order.order_number),
+        {"reason": ReturnReason.QUALITY_ISSUE, "items": [{"order_item_id": order_item.id, "quantity": 1}]},
+        format="json",
+    )
+    assert response.status_code == 201
+
+
+def test_food_is_not_returned_for_a_change_of_mind(authenticated_client, delivered_order):
+    ReturnPolicySettings.get_solo()
+    order_item = delivered_order.items.first()
+
+    response = authenticated_client.post(
+        _returns_create_url(delivered_order.order_number),
+        {"reason": ReturnReason.CUSTOMER_CHANGE_OF_MIND, "items": [{"order_item_id": order_item.id, "quantity": 1}]},
+        format="json",
+    )
+    assert response.status_code == 409
+    delivered_order.refresh_from_db()
+    assert delivered_order.status == OrderStatus.DELIVERED
