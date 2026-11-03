@@ -14,6 +14,7 @@ import pytest
 from apps.catalog.models import Product, ProductStatus, ProductType
 from apps.reviews.models import Review
 from apps.users.models import User
+from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
 
@@ -97,7 +98,7 @@ def _store(**overrides):
 def test_latest_reviews_mix_online_and_branch_opinions_and_say_which(api_client, product_with_variant_and_stock):
     product = product_with_variant_and_stock["product"]
     online = _review(product, _user("a@example.com", "محمد", "أحمد"))
-    branch = _store(product=product, rating=None, collected_on=date.today())
+    branch = _store(product=product, rating=None, collected_on=timezone.localdate())
 
     data = api_client.get(LATEST_URL).json()["data"]
 

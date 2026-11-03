@@ -25,6 +25,7 @@ from datetime import date, timedelta
 import pytest
 
 from apps.users.models import Address
+from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
 
@@ -333,7 +334,7 @@ def test_subscription_routes_are_scoped_to_their_owner(
         address=address,
         shipping_method=shipping_setup["method"],
         payment_method="cod",
-        next_order_date=date.today() + timedelta(days=30),
+        next_order_date=timezone.localdate() + timedelta(days=30),
     )
 
     assert other_client.get(f"/api/v1/subscriptions/{subscription.id}/").status_code in DENIED

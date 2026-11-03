@@ -117,7 +117,7 @@ def consume_reservation(reservation: StockReservation):
         return
     if locked.batch:
         batch = Batch.objects.select_for_update().get(pk=locked.batch_id)
-        if batch.expiration_date and batch.expiration_date <= timezone.now().date():
+        if batch.expiration_date and batch.expiration_date <= timezone.localdate():
             raise ApplicationError(ErrorCodes.NO_VALID_BATCH, "Cannot sell an expired batch.")
         batch.quantity -= locked.quantity
         batch.save(update_fields=["quantity"])
@@ -152,7 +152,7 @@ def get_batches_nearing_expiration(thresholds_days=None):
     from django.conf import settings
 
     thresholds_days = thresholds_days or settings.EXPIRATION_ALERT_DAYS
-    today = timezone.now().date()
+    today = timezone.localdate()
     result = {}
     for days in thresholds_days:
         target_date = today + timedelta(days=days)
@@ -161,4 +161,4 @@ def get_batches_nearing_expiration(thresholds_days=None):
 
 
 def get_expired_batches():
-    return Batch.objects.filter(is_active=True, quantity__gt=0, expiration_date__lt=timezone.now().date())
+    return Batch.objects.filter(is_active=True, quantity__gt=0, expiration_date__lt=timezone.localdate())

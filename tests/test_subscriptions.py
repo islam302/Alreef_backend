@@ -1,6 +1,7 @@
 import datetime
 
 import pytest
+from django.utils import timezone
 
 from apps.orders.models import Order
 from apps.subscriptions.models import (
@@ -26,7 +27,7 @@ SUBSCRIPTIONS_CREATE_URL = "/api/v1/subscriptions/create/"
 def _create_subscription(user, address, method, *, frequency=SubscriptionFrequency.MONTHLY, next_order_date=None):
     return Subscription.objects.create(
         user=user, name="Monthly Honey Box", address=address, shipping_method=method, payment_method="cod",
-        frequency=frequency, next_order_date=next_order_date or datetime.date.today(),
+        frequency=frequency, next_order_date=next_order_date or timezone.localdate(),
     )
 
 
@@ -38,7 +39,7 @@ def test_create_subscription_via_endpoint(authenticated_client, product_with_var
         "shipping_method_id": shipping_setup["method"].id,
         "payment_method": "cod",
         "frequency": "monthly",
-        "start_date": str(datetime.date.today()),
+        "start_date": str(timezone.localdate()),
         "items": [{"variant_id": variant.id, "quantity": 2}],
     }
 
@@ -91,7 +92,7 @@ def test_generate_order_for_subscription_creates_order_and_advances_next_date(
     user, address, shipping_setup, product_with_variant_and_stock,
 ):
     variant = product_with_variant_and_stock["variant"]
-    start_date = datetime.date.today()
+    start_date = timezone.localdate()
     subscription = _create_subscription(user, address, shipping_setup["method"], next_order_date=start_date)
     SubscriptionItem.objects.create(subscription=subscription, variant=variant, quantity=1)
 

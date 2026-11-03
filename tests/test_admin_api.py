@@ -26,6 +26,7 @@ from apps.coupons.models import Coupon
 from apps.orders.models import Order, OrderStatus
 from apps.reviews.models import Review
 from apps.users.models import User
+from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
 
@@ -457,7 +458,7 @@ def test_inventory_alerts_group_by_problem(staff_client, product_with_variant_an
 
 def test_expiring_batches_are_reported(staff_client, product_with_variant_and_stock):
     batch = product_with_variant_and_stock["batch"]
-    batch.expiration_date = datetime.date.today() + datetime.timedelta(days=10)
+    batch.expiration_date = timezone.localdate() + datetime.timedelta(days=10)
     batch.save(update_fields=["expiration_date"])
 
     data = staff_client.get("/api/v1/admin-api/inventory/alerts/").json()["data"]

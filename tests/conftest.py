@@ -30,6 +30,7 @@ from apps.shipping.models import (
 )
 from apps.users.models import Address
 from apps.users.models import User
+from django.utils import timezone
 
 
 @pytest.fixture(autouse=True)
@@ -165,7 +166,7 @@ def product_with_variant_and_stock(category, brand):
     item = get_or_create_item(variant)
     batch = Batch.objects.create(
         item=item, batch_number="BATCH-001", quantity=10, initial_quantity=10,
-        expiration_date=datetime.date.today() + datetime.timedelta(days=365), is_active=True,
+        expiration_date=timezone.localdate() + datetime.timedelta(days=365), is_active=True,
     )
     return {"product": product, "variant": variant, "item": item, "batch": batch}
 

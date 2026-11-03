@@ -8,6 +8,7 @@ import io
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 
@@ -151,7 +152,7 @@ def test_category_without_products_can_be_deleted(staff_client):
 
 
 def test_order_filters(staff_client, delivered_order):
-    today = datetime.date.today().isoformat()
+    today = timezone.localdate().isoformat()
     params = {"payment_method": delivered_order.payment_method, "date_from": today, "date_to": today}
     assert staff_client.get(f"{API}/orders/", params).json()["data"]["count"] == 1
     assert staff_client.get(f"{API}/orders/", {"date_from": "2999-01-01"}).json()["data"]["count"] == 0
@@ -166,7 +167,7 @@ def test_customer_filters_and_orders(staff_client, delivered_order, user):
 
 
 def test_audit_log_filters(staff_client, delivered_order):
-    today = datetime.date.today().isoformat()
+    today = timezone.localdate().isoformat()
     response = staff_client.get(f"{API}/audit-logs/", {"action": "status_change", "date_from": today, "date_to": today})
     assert response.status_code == 200
 

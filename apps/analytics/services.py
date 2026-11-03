@@ -28,7 +28,7 @@ def get_admin_dashboard_summary() -> dict:
     from apps.payments.models import Payment, PaymentStatus
     from apps.users.models import User
 
-    today = timezone.now().date()
+    today = timezone.localdate()
     today_orders = Order.objects.filter(created_at__date=today)
     all_orders_excl_cancelled = Order.objects.exclude(status=OrderStatus.CANCELLED)
 

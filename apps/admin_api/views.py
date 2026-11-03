@@ -554,7 +554,7 @@ class AdminInventoryViewSet(ReadOnlyEnvelopeViewSet):
     def alerts(self, request):
         """Everything that needs a human: low stock, out of stock, expiry."""
         items = list(self.get_queryset())
-        today = timezone.now().date()
+        today = timezone.localdate()
         try:
             expiry_days = int(request.query_params.get("expiry_days", 30) or 30)
         except (TypeError, ValueError):

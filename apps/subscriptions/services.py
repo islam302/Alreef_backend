@@ -28,8 +28,8 @@ def pause_subscription(subscription: Subscription):
 @transaction.atomic
 def resume_subscription(subscription: Subscription):
     subscription.status = SubscriptionStatus.ACTIVE
-    if subscription.next_order_date < timezone.now().date():
-        subscription.next_order_date = timezone.now().date() + timedelta(days=subscription.interval_days)
+    if subscription.next_order_date < timezone.localdate():
+        subscription.next_order_date = timezone.localdate() + timedelta(days=subscription.interval_days)
     subscription.save(update_fields=["status", "next_order_date"])
     return subscription
 
@@ -131,6 +131,6 @@ def generate_order_for_subscription(subscription: Subscription) -> SubscriptionS
 
 
 def process_due_subscriptions():
-    today = timezone.now().date()
+    today = timezone.localdate()
     due = Subscription.objects.filter(status=SubscriptionStatus.ACTIVE, next_order_date__lte=today)
     return [generate_order_for_subscription(s) for s in due]

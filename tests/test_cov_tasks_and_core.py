@@ -87,7 +87,7 @@ def test_low_stock_and_expiry_alert_tasks(product_with_variant_and_stock, settin
     lines = []
     monkeypatch.setattr(tasks.logger, "info", lambda msg, *args: lines.append(msg % args))
     batch = product_with_variant_and_stock["batch"]
-    batch.expiration_date = datetime.date.today() + timedelta(days=7)
+    batch.expiration_date = timezone.localdate() + timedelta(days=7)
     batch.save()
     settings.EXPIRATION_ALERT_DAYS = [7, 14]
     tasks.notify_low_stock_task(product_with_variant_and_stock["variant"].id, 1)
@@ -170,7 +170,7 @@ def test_deactivate_expired_batches_task(product_with_variant_and_stock):
     from apps.inventory.tasks import deactivate_expired_batches_task, release_expired_reservations_task
 
     batch = product_with_variant_and_stock["batch"]
-    batch.expiration_date = datetime.date.today() - timedelta(days=1)
+    batch.expiration_date = timezone.localdate() - timedelta(days=1)
     batch.save()
     assert deactivate_expired_batches_task() == 1
     batch.refresh_from_db()
@@ -243,16 +243,16 @@ def test_process_due_subscriptions_task(user, address, shipping_setup, product_w
 
     sub = Subscription.objects.create(
         user=user, name="Box", address=address, shipping_method=shipping_setup["method"], payment_method="cod",
-        frequency="monthly", next_order_date=datetime.date.today(),
+        frequency="monthly", next_order_date=timezone.localdate(),
     )
     SubscriptionItem.objects.create(subscription=sub, variant=product_with_variant_and_stock["variant"], quantity=1)
     Subscription.objects.create(
         user=user, name="Paused", address=address, shipping_method=shipping_setup["method"], payment_method="cod",
-        frequency="monthly", next_order_date=datetime.date.today(), status=SubscriptionStatus.PAUSED,
+        frequency="monthly", next_order_date=timezone.localdate(), status=SubscriptionStatus.PAUSED,
     )
     assert process_due_subscriptions_task() == 1
     sub.refresh_from_db()
-    assert sub.next_order_date > datetime.date.today()
+    assert sub.next_order_date > timezone.localdate()
     assert process_due_subscriptions_task() == 0
 
 
