@@ -32,6 +32,14 @@ class Coupon(BaseModel):
 
     is_active = models.BooleanField(default=True)
 
+    # A personal coupon: only this account can apply it, in the cart or at
+    # checkout. The welcome offer (apps.coupons.welcome) issues these. CASCADE,
+    # not SET_NULL — nulling the owner would turn a private code into a public
+    # one that anybody holding the string could spend.
+    owner = models.ForeignKey(
+        "users.User", on_delete=models.CASCADE, null=True, blank=True, related_name="personal_coupons",
+    )
+
     class Meta:
         indexes = [models.Index(fields=["code"]), models.Index(fields=["is_active"])]
 

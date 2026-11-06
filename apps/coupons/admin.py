@@ -12,7 +12,8 @@ class CouponUsageInline(admin.TabularInline):
 
 @admin.register(Coupon)
 class CouponAdmin(admin.ModelAdmin):
-    list_display = ["code", "discount_type", "is_active", "times_used", "usage_limit", "start_date", "expiration_date"]
+    list_display = ["code", "discount_type", "is_active", "times_used", "usage_limit", "start_date", "expiration_date", "owner"]
+    raw_id_fields = ["owner"]
     list_filter = ["discount_type", "is_active"]
     search_fields = ["code", "description"]
     filter_horizontal = ["products", "categories", "brands"]

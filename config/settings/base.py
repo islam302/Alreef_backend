@@ -182,6 +182,12 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 # ---------------------------------------------------------------------------
 # DRF
 # ---------------------------------------------------------------------------
+# Welcome offer (apps.coupons.welcome): the percentages a new visitor can be
+# offered — the server picks one at random — and how long it lasts from the
+# moment it is first shown. Capped at 50% in code whatever is set here.
+WELCOME_OFFER_PERCENTAGES = [int(p) for p in config("WELCOME_OFFER_PERCENTAGES", default="5,10").split(",") if p.strip()]
+WELCOME_OFFER_HOURS = config("WELCOME_OFFER_HOURS", default=24, cast=int)
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",

@@ -542,6 +542,7 @@ class StockAdjustmentSerializer(serializers.Serializer):
 # --------------------------------------------------------------------------
 class AdminCouponSerializer(serializers.ModelSerializer):
     times_used = serializers.IntegerField(source="usage_count", read_only=True, default=0)
+    owner_email = serializers.EmailField(source="owner.email", read_only=True, default=None)
 
     class Meta:
         model = Coupon
@@ -549,7 +550,7 @@ class AdminCouponSerializer(serializers.ModelSerializer):
             "id", "code", "description", "discount_type", "percentage_value", "fixed_amount_value",
             "minimum_order_amount", "maximum_discount_amount", "start_date", "expiration_date",
             "usage_limit", "per_user_limit", "products", "categories", "brands",
-            "is_active", "times_used", "created_at",
+            "is_active", "times_used", "created_at", "owner_email",
         ]
 
     def validate(self, attrs):
