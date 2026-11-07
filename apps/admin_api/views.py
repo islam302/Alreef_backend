@@ -621,6 +621,11 @@ class AdminCouponViewSet(EnvelopeViewSet):
         queryset = Coupon.objects.annotate(usage_count=Count("usages", distinct=True))
         if self.request.query_params.get("is_active") in {"true", "false"}:
             queryset = queryset.filter(is_active=self.request.query_params["is_active"] == "true")
+        # Personal coupons (one per welcome-offer customer) would bury the
+        # shop's own codes in the list. They stay reachable by id, and
+        # `?personal=true` lists them on their own.
+        if self.action == "list":
+            queryset = queryset.filter(owner__isnull=self.request.query_params.get("personal") != "true")
         return queryset
 
 

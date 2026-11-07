@@ -19,6 +19,18 @@ def get_valid_coupon(code: str) -> Coupon:
     return coupon
 
 
+def check_owner(coupon: Coupon, user) -> None:
+    """
+    A personal coupon belongs to one account. To anybody else — another
+    customer, or a guest — it answers exactly like a code that does not exist,
+    so holding someone's code string tells you nothing and buys you nothing.
+    """
+    if coupon.owner_id is None:
+        return
+    if user is None or not getattr(user, "is_authenticated", False) or user.pk != coupon.owner_id:
+        raise ApplicationError(ErrorCodes.INVALID_COUPON, "Coupon code is invalid.")
+
+
 def _check_per_user_limit(coupon: Coupon, user, phone: str = ""):
     """
     The per-customer cap. A customer is their account when they have one, and
@@ -59,6 +71,7 @@ def _applicable_items(coupon: Coupon, items):
 
 def validate_coupon_for_cart(*, code: str, cart, user=None, phone: str = "") -> Coupon:
     coupon = get_valid_coupon(code)
+    check_owner(coupon, user)
     _check_per_user_limit(coupon, user, phone)
 
     from apps.carts.services import get_cart_subtotal
