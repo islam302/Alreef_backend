@@ -8,6 +8,10 @@ drf-spectacular-sidecar>=2024.7.1
 psycopg[binary]>=3.2,<3.3
 redis>=5.0,<5.1
 celery>=5.4,<5.5
+# Celery's transport. Unpinned it resolved to 5.7.0, whose Redis transport
+# refuses redis-py < 6.1: every task queued (registration, analytics, order
+# mail) became a 500. Move it together with the redis pin above.
+kombu>=5.4,<5.7
 django-celery-beat>=2.9,<2.10
 django-celery-results>=2.5,<2.6
 django-redis>=5.4,<5.5
