@@ -250,10 +250,11 @@ For a manually-settled method (COD, InstaPay) additionally:
   `SMSProvider` subclass (`apps/notifications/providers/sms_base.py`) — only
   `console` (log-only) is implemented today. Required for phone OTP
   verification to actually reach customers.
-- [ ] Set `WHATSAPP_PROVIDER=meta_cloud_api` plus
-  `WHATSAPP_PHONE_NUMBER_ID`/`WHATSAPP_ACCESS_TOKEN` and implement a real
-  `WhatsAppProvider` subclass (`apps/notifications/providers/whatsapp_base.py`)
-  — only `console` is implemented today.
+- [ ] WhatsApp order updates: set `WHATSAPP_PROVIDER=meta_cloud_api`,
+  `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN` (permanent System User
+  token), `WHATSAPP_TEMPLATE_LANGUAGE`, and one `WHATSAPP_TEMPLATE_<MESSAGE>`
+  per approved Utility template (with `_PARAMS` matching its placeholders).
+  Unset templates send nothing. See docs/architecture/notifications.md.
 
 ## 9. File storage
 

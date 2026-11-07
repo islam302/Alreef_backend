@@ -38,11 +38,24 @@ def send_sms_task(self, *, to: str, message: str, event: str = "", user_id=None)
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def send_whatsapp_task(self, *, to: str, template_name: str, params: dict, event: str = "", user_id=None):
-    result = send_whatsapp_now(to=to, template_name=template_name, params=params)
-    log_delivery(event=event, channel=NotificationChannel.WHATSAPP, recipient=to, success=result["success"], user_id=user_id,
-                 provider_message_id=result.get("provider_message_id", ""))
-    if not result["success"]:
-        raise self.retry(exc=Exception("whatsapp send failed"))
+    from apps.notifications.whatsapp import to_e164
+
+    number = to_e164(to)
+    if not number:
+        # Recorded, not retried: the number will not become valid by waiting.
+        log_delivery(event=event, channel=NotificationChannel.WHATSAPP, recipient=str(to), success=False,
+                     user_id=user_id, error_message="not a mobile number WhatsApp can reach")
+        return {"success": False, "provider_message_id": "", "error": "invalid number", "retryable": False}
+
+    result = send_whatsapp_now(to=number, template_name=template_name, params=params)
+    log_delivery(event=event, channel=NotificationChannel.WHATSAPP, recipient=number, success=result["success"], user_id=user_id,
+                 provider_message_id=result.get("provider_message_id") or "", error_message=result.get("error", ""))
+    # Only a failure that might go differently next time is retried. A template
+    # Meta does not know, or a number not on WhatsApp, fails the same way on
+    # every attempt, and a retry after an unanswered request could deliver the
+    # message twice (providers/meta_cloud.py).
+    if not result["success"] and result.get("retryable", True):
+        raise self.retry(exc=Exception(result.get("error") or "whatsapp send failed"))
     return result
 
 

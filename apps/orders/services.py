@@ -255,8 +255,55 @@ STATUS_EMAILS = {
 }
 
 
+# Status -> (notification event, WhatsApp message). The template behind each
+# message is named in settings.WHATSAPP_ORDER_TEMPLATES, and a message with no
+# template is not sent. Out for delivery has a message and no email: it is the
+# one a COD customer needs on their phone, so they are home with the cash.
+STATUS_WHATSAPP = {
+    OrderStatus.CONFIRMED: ("order_created", "order_confirmed"),
+    OrderStatus.SHIPPED: ("order_shipped", "order_shipped"),
+    OrderStatus.OUT_FOR_DELIVERY: ("out_for_delivery", "order_out_for_delivery"),
+    OrderStatus.DELIVERED: ("order_delivered", "order_delivered"),
+    OrderStatus.CANCELLED: ("order_cancelled", "order_cancelled"),
+}
+
+
+def format_money(amount, currency: str) -> str:
+    """450.00 ج.م — an amount as a customer reads it in a message."""
+    label = "ج.م" if str(currency) == "EGP" else str(currency)
+    return f"{amount:,.2f} {label}"
+
+
+def order_whatsapp_fields(order: Order) -> dict:
+    """What an order's WhatsApp templates may be filled with (settings.WHATSAPP_ORDER_TEMPLATES)."""
+    from apps.orders.guest import order_url_for
+
+    name = (order.customer_name or "").strip()
+    return {
+        "customer_name": name,
+        "first_name": name.split()[0] if name else "",
+        "order_number": order.order_number,
+        "total": format_money(order.grand_total.amount, order.currency),
+        "order_url": order_url_for(order),
+    }
+
+
+def queue_order_whatsapp(order: Order, message: str, *, event: str, extra: dict | None = None) -> bool:
+    """Send the customer `message` about this order on WhatsApp, after commit."""
+    from apps.notifications.whatsapp import queue_whatsapp_template
+
+    return queue_whatsapp_template(
+        to=order.customer_phone, message=message, fields={**order_whatsapp_fields(order), **(extra or {})},
+        event=event, user_id=order.user_id,
+    )
+
+
 def _dispatch_status_notification(order: Order, new_status: str):
     from apps.notifications.services import queue_email
+
+    whatsapp = STATUS_WHATSAPP.get(new_status)
+    if whatsapp:
+        queue_order_whatsapp(order, whatsapp[1], event=whatsapp[0])
 
     entry = STATUS_EMAILS.get(new_status)
     if not entry:

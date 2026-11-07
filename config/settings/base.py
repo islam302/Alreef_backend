@@ -457,6 +457,41 @@ SMS_SENDER_ID = config("SMS_SENDER_ID", default="ALREEF")
 WHATSAPP_PROVIDER = config("WHATSAPP_PROVIDER", default="console")  # console | meta_cloud_api
 WHATSAPP_PHONE_NUMBER_ID = config("WHATSAPP_PHONE_NUMBER_ID", default="")
 WHATSAPP_ACCESS_TOKEN = config("WHATSAPP_ACCESS_TOKEN", default="")
+# Graph API version in the Cloud API URL. Meta retires a version about two years
+# after its release; move this forward before then.
+WHATSAPP_GRAPH_API_VERSION = config("WHATSAPP_GRAPH_API_VERSION", default="v24.0")
+WHATSAPP_TIMEOUT_SECONDS = config("WHATSAPP_TIMEOUT_SECONDS", default=10, cast=int)
+# The language the templates were approved in, as WhatsApp Manager names it
+# ("ar", "ar_EG", "en_US", ...). It has to match exactly or Meta refuses the send.
+WHATSAPP_TEMPLATE_LANGUAGE = config("WHATSAPP_TEMPLATE_LANGUAGE", default="ar")
+
+# The order updates a customer gets on WhatsApp, each an approved Utility
+# template in WhatsApp Manager (apps.orders.services.STATUS_WHATSAPP).
+#
+# WHATSAPP_TEMPLATE_<MESSAGE> is the template's name; empty switches that
+# message off, which is the default for all of them, so nothing is sent until
+# a template has been approved and named here.
+# WHATSAPP_TEMPLATE_<MESSAGE>_PARAMS lists the order fields that fill the
+# template's {{1}}, {{2}}, ... in that order. They must match the template as
+# approved: Meta refuses a send with too few or too many. Fields available:
+# customer_name, first_name, order_number, total, order_url, and for
+# order_awaiting_payment also amount, pay_to, account_name, reference.
+WHATSAPP_ORDER_TEMPLATES = {
+    message: {
+        "name": config(f"WHATSAPP_TEMPLATE_{message.upper()}", default=""),
+        "params": config(f"WHATSAPP_TEMPLATE_{message.upper()}_PARAMS", default=default_params, cast=Csv()),
+    }
+    for message, default_params in {
+        # A transfer or deposit order, placed and waiting for the money.
+        "order_awaiting_payment": "customer_name,order_number,amount,pay_to",
+        # Cash on delivery at checkout; online and transfer orders once paid.
+        "order_confirmed": "customer_name,order_number,total",
+        "order_shipped": "customer_name,order_number",
+        "order_out_for_delivery": "customer_name,order_number",
+        "order_delivered": "customer_name,order_number",
+        "order_cancelled": "customer_name,order_number",
+    }.items()
+}
 
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 

@@ -52,15 +52,61 @@ against that vendor's actual API and registering it in the provider factory
 — the same "don't fabricate an untested integration" policy as payment/
 shipping providers.
 
-### WhatsApp — provider abstraction, console default
+### WhatsApp — order updates through Meta's WhatsApp Cloud API
 
-Same shape: `apps.notifications.providers.whatsapp_base.WhatsAppProvider`
-(ABC, `send_template(to, template_name, params)`), with `ConsoleWhatsAppProvider`
-as the only implementation. Docstring points at the intended real
-integration: "A real integration uses the official WhatsApp Cloud API (Meta)
-with `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` from the
-environment — never hard-code credentials in source." `settings.WHATSAPP_PROVIDER`
-(`.env`: `console` | `meta_cloud_api`) selects the provider.
+`apps.notifications.providers.whatsapp_base.WhatsAppProvider` (ABC,
+`send_template(to, template_name, params)`) has two implementations, chosen by
+`WHATSAPP_PROVIDER`:
+
+- `console` — logs instead of sending (development, tests).
+- `meta_cloud_api` — `providers/meta_cloud.py`, Meta's official Cloud API:
+  `POST https://graph.facebook.com/<WHATSAPP_GRAPH_API_VERSION>/<WHATSAPP_PHONE_NUMBER_ID>/messages`
+  with `Authorization: Bearer <WHATSAPP_ACCESS_TOKEN>`, `type: template`, the
+  template's body parameters filled in order. A 200 returns the `wamid.…`
+  message id, stored as `NotificationLog.provider_message_id`. A 200 means
+  Meta accepted the message; delivered/read/failed statuses come later on a
+  webhook this shop does not subscribe to yet.
+
+Unofficial WhatsApp Web automation is not offered: it violates WhatsApp's terms
+and gets the number banned.
+
+**What is sent, and when** (`apps.orders.services.STATUS_WHATSAPP`, plus the
+checkout transfer path):
+
+| Message key | When | Event logged | Default parameters |
+|---|---|---|---|
+| `order_awaiting_payment` | Transfer (InstaPay / Vodafone Cash) or COD-deposit order placed | `order_created` | customer_name, order_number, amount, pay_to |
+| `order_confirmed` | Order moves to CONFIRMED (COD at checkout; online/transfer once paid) | `order_created` | customer_name, order_number, total |
+| `order_shipped` | → SHIPPED | `order_shipped` | customer_name, order_number |
+| `order_out_for_delivery` | → OUT_FOR_DELIVERY (no email for this one) | `out_for_delivery` | customer_name, order_number |
+| `order_delivered` | → DELIVERED | `order_delivered` | customer_name, order_number |
+| `order_cancelled` | → CANCELLED (the staff reason is never included) | `order_cancelled` | customer_name, order_number |
+
+A card order that is never paid sends nothing. Guest and signed-in orders are
+treated alike: the message goes to `Order.customer_phone`.
+
+Each message is an approved Utility template named in
+`WHATSAPP_TEMPLATE_<MESSAGE>`; empty (the default) switches it off.
+`WHATSAPP_TEMPLATE_<MESSAGE>_PARAMS` lists the fields filling `{{1}}, {{2}}, …`
+— it must match the template as approved. Fields: `customer_name`,
+`first_name`, `order_number`, `total` ("450.00 ج.م"), `order_url`, and for
+`order_awaiting_payment` also `amount`, `pay_to`, `account_name`, `reference`.
+A field name the message cannot fill is logged as an error and that message is
+skipped; the order is never affected. `WHATSAPP_TEMPLATE_LANGUAGE` must match
+the template's approved language code exactly.
+
+**Path:** `queue_order_whatsapp` → `notifications.whatsapp.queue_whatsapp_template`
+→ `transaction.on_commit` → `send_whatsapp_task` (Celery) → provider. Like
+email, a rolled-back transaction sends nothing and a broker outage costs the
+message, not the order. The task normalises the number to E.164
+(`notifications.whatsapp.to_e164`: `01001234567`, `201001234567`,
+`0020…`, Arabic digits, Gulf numbers; landlines refused) and writes a
+`NotificationLog` row for every attempt, with Meta's error code and message on
+failure. Only throttling, Meta-side outages and connection failures are
+retried; a wrong template, a number not on WhatsApp, an expired token, or a
+request that timed out after being sent (it may have been delivered) are not.
+A `meta_cloud_api` provider without its id/token logs a failure on each send
+instead of raising.
 
 ### In-app notifications
 

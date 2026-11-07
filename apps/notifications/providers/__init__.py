@@ -1,6 +1,7 @@
 from django.conf import settings
 
 from .sms_base import ConsoleSMSProvider, SMSProvider
+from .meta_cloud import MetaCloudWhatsAppProvider
 from .whatsapp_base import ConsoleWhatsAppProvider, WhatsAppProvider
 
 __all__ = [
@@ -46,7 +47,9 @@ def get_whatsapp_provider() -> WhatsAppProvider:
     provider = getattr(settings, "WHATSAPP_PROVIDER", "console")
     if provider == "console":
         return ConsoleWhatsAppProvider()
+    if provider == "meta_cloud_api":
+        # Meta's official WhatsApp Cloud API (apps/notifications/providers/meta_cloud.py).
+        return MetaCloudWhatsAppProvider()
     raise NotImplementedError(
-        f"WhatsApp provider '{provider}' is not implemented. Only 'console' ships out of the box; "
-        "implement a WhatsAppProvider subclass against the official WhatsApp Cloud API docs to add one."
+        f"WhatsApp provider '{provider}' is not implemented. Use 'console' or 'meta_cloud_api'."
     )

@@ -116,7 +116,15 @@ def send_sms_now(*, to: str, message: str) -> dict:
 
 
 def send_whatsapp_now(*, to: str, template_name: str, params: dict) -> dict:
-    return get_whatsapp_provider().send_template(to=to, template_name=template_name, params=params)
+    try:
+        provider = get_whatsapp_provider()
+    except NotImplementedError as exc:
+        # Switched on without its credentials, or an unknown provider name.
+        # Logged on the delivery record rather than raised, so it shows up next
+        # to the message it cost; retrying would not supply the credential.
+        logger.error("WhatsApp is misconfigured: %s", exc)
+        return {"success": False, "provider_message_id": "", "error": str(exc), "retryable": False}
+    return provider.send_template(to=to, template_name=template_name, params=params)
 
 
 def create_in_app_notification(*, user, event: str, title: str, body: str = "", data: dict | None = None):

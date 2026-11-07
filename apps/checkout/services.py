@@ -340,7 +340,7 @@ def create_order_from_cart(
         # The order waits, pending, for its deposit. Staff confirm the transfer
         # in the dashboard (record_manual_receipt), and that confirms the order.
         deposit = _create_deposit(order, totals, route=deposit_route, idempotency_key=idempotency_key)
-        _email_transfer_details(order, deposit)
+        _send_transfer_details(order, deposit)
         return order, deposit
 
     if payment_method == PaymentMethodSnapshot.COD:
@@ -354,7 +354,7 @@ def create_order_from_cart(
         payment.refresh_from_db()
         order.refresh_from_db()
     elif payment.provider in TRANSFER_ROUTES and payment.status == "requires_action":
-        _email_transfer_details(order, payment)
+        _send_transfer_details(order, payment)
 
     return order, payment
 
@@ -412,16 +412,31 @@ def _create_deposit(order, totals, *, route: str, idempotency_key: str):
     return deposit
 
 
-def _email_transfer_details(order, payment):
+def _send_transfer_details(order, payment):
     """
-    Where to send the money, by email as well as on screen.
+    Where to send the money, by email and WhatsApp as well as on screen.
 
     A customer who closes the confirmation page before writing down the wallet
     number or InstaPay address has no other way to pay, and phones us. After
     commit, so a checkout that rolls back sends nothing.
     """
     from apps.notifications.services import queue_email
-    from apps.orders.services import order_email_context
+    from apps.orders.services import format_money, order_email_context, queue_order_whatsapp
+
+    # Every order that is not confirmed on the spot comes through here, so this
+    # is where a transfer or deposit customer first hears from us on WhatsApp.
+    # A card order hears nothing until it is paid: the "confirmed" message
+    # follows the payment, and an abandoned card page should leave no message.
+    transfer = payment.metadata or {}
+    queue_order_whatsapp(
+        order, "order_awaiting_payment", event="order_created",
+        extra={
+            "amount": format_money(payment.amount.amount, str(payment.amount.currency)),
+            "pay_to": transfer.get("wallet_number") or transfer.get("instapay_address", ""),
+            "account_name": transfer.get("wallet_account_name") or transfer.get("instapay_account_name", ""),
+            "reference": transfer.get("transfer_reference", order.order_number),
+        },
+    )
 
     metadata = payment.metadata or {}
     queue_email(

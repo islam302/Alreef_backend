@@ -61,7 +61,7 @@ def test_sms_and_whatsapp_tasks(user):
 
 @pytest.mark.parametrize("task_name,kwargs", [
     ("send_sms_task", {"to": "+20100", "message": "x"}),
-    ("send_whatsapp_task", {"to": "+20100", "template_name": "t", "params": {}}),
+    ("send_whatsapp_task", {"to": "+201001234567", "template_name": "t", "params": {}}),
 ])
 def test_sms_and_whatsapp_failures_retry(monkeypatch, task_name, kwargs):
     from apps.notifications import tasks
