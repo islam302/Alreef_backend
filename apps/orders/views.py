@@ -40,7 +40,7 @@ class OrderDetailView(RetrieveAPIView):
     lookup_field = "order_number"
 
     def get_queryset(self):
-        return Order.objects.filter(user=self.request.user).prefetch_related("items", "status_history")
+        return Order.objects.filter(user=self.request.user).prefetch_related("items__review", "status_history")
 
     def retrieve(self, request, *args, **kwargs):
         return success_response(self.get_serializer(self.get_object()).data)
@@ -152,7 +152,7 @@ class GuestOrderLookupView(APIView):
             # make us call the gateway.
             _reconcile_open_payment(order)
 
-        order = Order.objects.prefetch_related("items", "status_history", "payments").get(pk=order.pk)
+        order = Order.objects.prefetch_related("items__review", "status_history", "payments").get(pk=order.pk)
         return success_response(GuestOrderStatusSerializer(order).data)
 
 

@@ -37,6 +37,35 @@ def create_review(*, user, product, rating: int, title: str = "", comment: str =
 
 
 @transaction.atomic
+def create_guest_review(*, order, order_item_id: int, rating: int, title: str = "", comment: str = ""):
+    """A review from a guest, for one line of their own delivered order.
+
+    The caller has already proved the order is theirs (access token, or order
+    number + phone). Same rules as an account: delivered orders only, one
+    review per purchased line, moderated before it shows."""
+    from apps.orders.models import OrderItem, OrderStatus
+
+    if order.status != OrderStatus.DELIVERED:
+        raise ApplicationError(
+            ErrorCodes.REVIEW_NOT_ELIGIBLE,
+            "Only customers with a delivered order for this product may leave a review.",
+        )
+    order_item = (
+        OrderItem.objects.select_for_update().select_related("product")
+        .filter(pk=order_item_id, order=order, product__isnull=False).first()
+    )
+    if order_item is None:
+        raise ApplicationError(ErrorCodes.REVIEW_NOT_ELIGIBLE, "This product is not on this order.")
+    if Review.objects.filter(order_item=order_item).exists():
+        raise ApplicationError(ErrorCodes.REVIEW_ALREADY_EXISTS, "You have already reviewed this purchase.")
+
+    return Review.objects.create(
+        product=order_item.product, user=None, order_item=order_item, rating=rating, title=title,
+        comment=comment, verified_purchase=True,
+    )
+
+
+@transaction.atomic
 def vote_helpful(*, review: Review, user):
     _, created = ReviewHelpfulVote.objects.get_or_create(review=review, user=user)
     if created:

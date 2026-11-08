@@ -27,6 +27,22 @@ def public_display_name(user) -> str:
     return f"{first} {last[0]}." if last else first
 
 
+def guest_display_name(full_name: str) -> str:
+    """The same "first name, last initial" for a guest, from the name typed at
+    checkout. Anything that looks like a phone or an email is never shown."""
+    words = (full_name or "").split()
+    if not words or any("@" in w or any(ch.isdigit() for ch in w) for w in words):
+        return ANONYMOUS_REVIEWER
+    return f"{words[0]} {words[-1][0]}." if len(words) > 1 else words[0]
+
+
+def reviewer_name(review) -> str:
+    if review.user_id:
+        return public_display_name(review.user)
+    order_item = review.order_item
+    return guest_display_name(order_item.order.customer_name if order_item else "")
+
+
 class ReviewSerializer(serializers.ModelSerializer):
     images = ReviewImageSerializer(many=True, read_only=True)
     user_name = serializers.SerializerMethodField()
@@ -40,7 +56,7 @@ class ReviewSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_user_name(self, obj) -> str:
-        return public_display_name(obj.user)
+        return reviewer_name(obj)
 
 
 class ReviewProductSerializer(serializers.Serializer):
@@ -118,3 +134,22 @@ class ReviewCreateSerializer(serializers.Serializer):
     rating = serializers.IntegerField(min_value=1, max_value=5)
     title = serializers.CharField(max_length=150, required=False, allow_blank=True)
     comment = serializers.CharField(required=False, allow_blank=True)
+
+
+class GuestReviewCreateSerializer(serializers.Serializer):
+    """A guest's review of one line of their delivered order. The order is
+    proved the way the tracking page proves it: the access token checkout
+    returned, or the order number with the phone it was placed with."""
+
+    token = serializers.CharField(required=False, allow_blank=True, max_length=512, default="")
+    order_number = serializers.CharField(required=False, allow_blank=True, max_length=30, default="")
+    phone = serializers.CharField(required=False, allow_blank=True, max_length=32, default="")
+    order_item_id = serializers.IntegerField()
+    rating = serializers.IntegerField(min_value=1, max_value=5)
+    title = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    comment = serializers.CharField(max_length=2000, required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        if not attrs["token"] and not (attrs["order_number"] and attrs["phone"]):
+            raise serializers.ValidationError("Send the order's token, or its number and phone.")
+        return attrs

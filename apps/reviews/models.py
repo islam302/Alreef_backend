@@ -7,7 +7,12 @@ from apps.core.validators import validate_image_file
 
 class Review(BaseModel):
     product = models.ForeignKey("catalog.Product", on_delete=models.CASCADE, related_name="reviews")
-    user = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="reviews")
+    # Empty for a guest's review: a guest order has no account, so the delivered
+    # order item (through the order's access token or number + phone) is what
+    # proves the purchase, and the public name comes from the order.
+    user = models.ForeignKey(
+        "users.User", on_delete=models.CASCADE, related_name="reviews", null=True, blank=True,
+    )
     order_item = models.ForeignKey(
         "orders.OrderItem", on_delete=models.SET_NULL, null=True, blank=True, related_name="review",
         help_text="Set when the review is tied to a verified purchase.",
@@ -24,10 +29,18 @@ class Review(BaseModel):
     class Meta:
         ordering = ["-created_at"]
         unique_together = [("product", "user", "order_item")]
+        constraints = [
+            # One review per purchased line, whoever writes it: without this a
+            # guest (user NULL) could review the same delivered item twice,
+            # since NULLs never collide in the unique_together above.
+            models.UniqueConstraint(
+                fields=["order_item"], condition=models.Q(order_item__isnull=False), name="review_one_per_order_item",
+            ),
+        ]
         indexes = [models.Index(fields=["product", "approved"])]
 
     def __str__(self):
-        return f"{self.rating}★ {self.product} by {self.user_id}"
+        return f"{self.rating}★ {self.product} by {self.user_id or 'guest'}"
 
 
 def review_image_upload_path(instance, filename):

@@ -9,13 +9,24 @@ from apps.orders.models import (
 )
 
 
+def item_reviewed(item) -> bool:
+    """Whether this purchased line already has a review (prefetch items__review)."""
+    return bool(item.review.all())
+
+
 class OrderItemSerializer(serializers.ModelSerializer):
+    # A delivered line with a product and no review yet can be reviewed.
+    reviewed = serializers.SerializerMethodField()
+
     class Meta:
         model = OrderItem
         fields = [
             "id", "product", "variant", "product_name_snapshot", "variant_name_snapshot", "sku_snapshot",
-            "unit_price", "quantity", "discount_amount", "tax_amount", "line_total",
+            "unit_price", "quantity", "discount_amount", "tax_amount", "line_total", "reviewed",
         ]
+
+    def get_reviewed(self, obj) -> bool:
+        return item_reviewed(obj)
 
 
 class OrderStatusHistorySerializer(serializers.ModelSerializer):
@@ -146,6 +157,9 @@ class GuestOrderStatusSerializer(serializers.ModelSerializer):
     def get_items(self, obj):
         return [
             {
+                "id": item.id,
+                "product": item.product_id,
+                "reviewed": item_reviewed(item),
                 "product_name_snapshot": item.product_name_snapshot,
                 "variant_name_snapshot": item.variant_name_snapshot,
                 "quantity": item.quantity,

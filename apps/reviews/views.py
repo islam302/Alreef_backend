@@ -13,6 +13,7 @@ from apps.core.validators import validate_image_file
 from apps.reviews import services
 from apps.reviews.models import Review, ReviewImage, StoreReview
 from apps.reviews.serializers import (
+    GuestReviewCreateSerializer,
     LatestReviewSerializer,
     LatestStoreReviewSerializer,
     ReviewCreateSerializer,
@@ -30,7 +31,7 @@ class ProductReviewListView(ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        return Review.objects.filter(product_id=self.kwargs["product_id"], approved=True).select_related("user").prefetch_related("images")
+        return Review.objects.filter(product_id=self.kwargs["product_id"], approved=True).select_related("user", "order_item__order").prefetch_related("images")
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -69,7 +70,7 @@ class LatestReviewListView(APIView):
                 product__status=ProductStatus.ACTIVE,
             )
             .exclude(comment="")
-            .select_related("user", "product")
+            .select_related("user", "product", "order_item__order")
             .prefetch_related("images")
             .order_by("-created_at")[:limit]
         )
@@ -122,6 +123,47 @@ class ReviewCreateView(APIView):
             title=serializer.validated_data.get("title", ""), comment=serializer.validated_data.get("comment", ""),
         )
         ReviewImage.objects.bulk_create([ReviewImage(review=review, image=image) for image in images])
+        return success_response(ReviewSerializer(review).data, message="Review submitted for moderation.", status=201)
+
+
+@extend_schema(tags=["Reviews"], request=GuestReviewCreateSerializer, responses=envelope(ReviewSerializer, name="GuestReviewCreate"))
+class GuestReviewCreateView(APIView):
+    """
+    POST /api/v1/reviews/guest/ — a review from somebody who ordered without an
+    account, for one item of their delivered order.
+
+    The order is proved exactly as on the tracking page (apps/orders/guest.py):
+    the access token, or the order number with its phone. Every miss is the
+    same 404, wrong phones count towards the same per-order lock, and the
+    tight lookup throttle applies, so this cannot be used to probe orders.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "order_lookup"
+
+    def post(self, request):
+        from apps.orders import guest
+
+        serializer = GuestReviewCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if data["token"]:
+            order = guest.order_for_token(data["token"])
+        else:
+            try:
+                order = guest.order_for_number_and_phone(data["order_number"], data["phone"])
+            except guest.LookupLocked:
+                raise ApplicationError(
+                    ErrorCodes.THROTTLED, "Too many attempts for this order number. Please try again later.",
+                )
+        if order is None:
+            raise ApplicationError(ErrorCodes.ORDER_NOT_FOUND, "We could not find an order with these details.")
+
+        review = services.create_guest_review(
+            order=order, order_item_id=data["order_item_id"], rating=data["rating"],
+            title=data["title"].strip(), comment=data["comment"].strip(),
+        )
         return success_response(ReviewSerializer(review).data, message="Review submitted for moderation.", status=201)
 
 

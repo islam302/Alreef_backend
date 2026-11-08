@@ -572,15 +572,26 @@ class AdminCouponSerializer(serializers.ModelSerializer):
 # --------------------------------------------------------------------------
 class AdminReviewSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name_ar", read_only=True)
-    customer_name = serializers.CharField(source="user.full_name", read_only=True)
+    # A guest's review has no account: staff see the name and order instead.
+    customer_name = serializers.SerializerMethodField()
+    order_number = serializers.CharField(source="order_item.order.order_number", read_only=True, default="")
+    is_guest = serializers.SerializerMethodField()
 
     class Meta:
         model = Review
         fields = [
-            "id", "product", "product_name", "user", "customer_name", "rating", "title",
-            "comment", "verified_purchase", "approved", "helpful_votes", "created_at",
+            "id", "product", "product_name", "user", "customer_name", "order_number", "is_guest", "rating",
+            "title", "comment", "verified_purchase", "approved", "helpful_votes", "created_at",
         ]
         read_only_fields = ["product", "user", "rating", "title", "comment", "verified_purchase", "helpful_votes"]
+
+    def get_customer_name(self, obj) -> str:
+        if obj.user_id:
+            return obj.user.full_name
+        return obj.order_item.order.customer_name if obj.order_item_id else ""
+
+    def get_is_guest(self, obj) -> bool:
+        return not obj.user_id
 
 
 class AdminStoreReviewSerializer(serializers.ModelSerializer):

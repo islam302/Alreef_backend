@@ -642,7 +642,7 @@ class AdminReviewViewSet(DeletableEnvelopeViewSet):
     ordering = ["-created_at"]
 
     def get_queryset(self):
-        queryset = Review.objects.select_related("product", "user")
+        queryset = Review.objects.select_related("product", "user", "order_item__order")
         approved = self.request.query_params.get("approved")
         if approved in {"true", "false"}:
             queryset = queryset.filter(approved=approved == "true")
