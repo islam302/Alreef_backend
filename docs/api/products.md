@@ -72,6 +72,7 @@ Success `200` (paginated envelope, `ProductListSerializer`):
         "price": "450.00", "compare_at_price": "500.00", "product_type": "variable",
         "badges": ["ORGANIC"], "computed_badges": ["ORGANIC", "SALE"],
         "primary_image": { "id": 10, "image": "/media/products/101/images/main.jpg", "alt_text": "Sidr Honey jar", "is_primary": true, "sort_order": 0, "variant": null },
+        "secondary_image": { "id": 11, "image": "/media/products/101/images/side.jpg", "alt_text": "Sidr Honey jar, side", "is_primary": false, "sort_order": 1, "variant": null },
         "in_stock": true, "featured": true
       }
     ],

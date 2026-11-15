@@ -235,3 +235,31 @@ def test_recently_viewed_rejects_a_duplicate_at_the_database_level(
     with pytest.raises(IntegrityError):
         with transaction.atomic():
             RecentlyViewed.objects.create(user=user, session_key=None, product=product)
+
+
+def test_product_list_carries_the_side_shot_for_the_hover_swap(api_client, category, brand):
+    from apps.catalog.models import ProductImage
+
+    product = _make_product(category, brand)
+    variant = ProductVariant.objects.create(product=product, name_suffix="500g", price=Decimal("300.00"))
+    # Uploaded out of order on purpose: the side shot is picked by sort order, not upload order.
+    ProductImage.objects.create(product=product, image="products/x/back.jpg", sort_order=3)
+    ProductImage.objects.create(product=product, image="products/x/front.jpg", is_primary=True, sort_order=5)
+    ProductImage.objects.create(product=product, variant=variant, image="products/x/size.jpg", sort_order=0)
+    ProductImage.objects.create(product=product, image="products/x/side.jpg", sort_order=1)
+
+    row = next(p for p in api_client.get(PRODUCTS_URL).json()["data"]["results"] if p["slug"] == product.slug)
+
+    assert row["primary_image"]["image"].endswith("front.jpg")
+    assert row["secondary_image"]["image"].endswith("side.jpg")
+
+
+def test_product_list_has_no_side_shot_with_a_single_photo(api_client, category, brand):
+    from apps.catalog.models import ProductImage
+
+    product = _make_product(category, brand)
+    ProductImage.objects.create(product=product, image="products/x/front.jpg", is_primary=True)
+
+    row = next(p for p in api_client.get(PRODUCTS_URL).json()["data"]["results"] if p["slug"] == product.slug)
+
+    assert row["secondary_image"] is None

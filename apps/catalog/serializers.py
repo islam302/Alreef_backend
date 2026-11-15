@@ -58,10 +58,16 @@ class BundleItemSerializer(serializers.ModelSerializer):
         fields = ["id", "component", "quantity"]
 
 
+def _primary(product):
+    images = product.images.all()
+    return next((i for i in images if i.is_primary), None) or next(iter(images), None)
+
+
 class ProductListSerializer(serializers.ModelSerializer):
     brand = BrandSerializer(read_only=True)
     category = CategoryListSerializer(read_only=True)
     primary_image = serializers.SerializerMethodField()
+    secondary_image = serializers.SerializerMethodField()
     computed_badges = serializers.SerializerMethodField()
     in_stock = serializers.SerializerMethodField()
 
@@ -70,12 +76,23 @@ class ProductListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name_en", "name_ar", "slug", "short_description", "brand", "category",
             "price", "compare_at_price", "product_type", "badges", "computed_badges",
-            "primary_image", "in_stock", "featured",
+            "primary_image", "secondary_image", "in_stock", "featured",
         ]
 
     def get_primary_image(self, obj):
-        image = next((i for i in obj.images.all() if i.is_primary), None) or next(iter(obj.images.all()), None)
+        image = _primary(obj)
         return ProductImageSerializer(image).data if image else None
+
+    def get_secondary_image(self, obj):
+        """The side shot a card crossfades to on hover: the first product-level
+        image after the primary one (by sort order, then upload order). Variant
+        photos are left out — they show a size, not another angle."""
+        primary = _primary(obj)
+        rest = sorted(
+            (i for i in obj.images.all() if i.variant_id is None and (primary is None or i.pk != primary.pk)),
+            key=lambda i: (i.sort_order, i.pk),
+        )
+        return ProductImageSerializer(rest[0]).data if rest and primary else None
 
     def get_computed_badges(self, obj):
         badges = list(obj.badges)

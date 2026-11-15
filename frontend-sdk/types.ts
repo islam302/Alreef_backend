@@ -366,6 +366,8 @@ export interface ProductListItem {
   badges: StoredBadge[];
   computed_badges: ComputedBadge[];
   primary_image: ProductImage | null;
+  /** Side shot the storefront card crossfades to on hover: the first product-level image after the primary one. Null when there is only one photo. */
+  secondary_image: ProductImage | null;
   in_stock: boolean;
   featured: boolean;
 }
