@@ -263,3 +263,35 @@ def test_product_list_has_no_side_shot_with_a_single_photo(api_client, category,
     row = next(p for p in api_client.get(PRODUCTS_URL).json()["data"]["results"] if p["slug"] == product.slug)
 
     assert row["secondary_image"] is None
+
+
+def test_side_shot_falls_back_to_the_primarys_own_size(api_client, category, brand):
+    """Photos filed under sizes: the card swaps to the same size's side shot,
+    never to a photo of another size."""
+    from apps.catalog.models import ProductImage
+
+    product = _make_product(category, brand)
+    kilo = ProductVariant.objects.create(product=product, name_suffix="1kg", price=Decimal("350.00"))
+    half = ProductVariant.objects.create(product=product, name_suffix="500g", price=Decimal("220.00"))
+    ProductImage.objects.create(product=product, variant=kilo, image="products/x/kilo-front.jpg", is_primary=True, sort_order=0)
+    ProductImage.objects.create(product=product, variant=half, image="products/x/half-front.jpg", sort_order=1)
+    ProductImage.objects.create(product=product, variant=kilo, image="products/x/kilo-side.jpg", sort_order=2)
+    ProductImage.objects.create(product=product, variant=half, image="products/x/half-side.jpg", sort_order=3)
+
+    row = next(p for p in api_client.get(PRODUCTS_URL).json()["data"]["results"] if p["slug"] == product.slug)
+
+    assert row["secondary_image"]["image"].endswith("kilo-side.jpg")
+
+
+def test_no_side_shot_when_only_other_sizes_remain(api_client, category, brand):
+    from apps.catalog.models import ProductImage
+
+    product = _make_product(category, brand)
+    kilo = ProductVariant.objects.create(product=product, name_suffix="1kg", price=Decimal("350.00"))
+    half = ProductVariant.objects.create(product=product, name_suffix="500g", price=Decimal("220.00"))
+    ProductImage.objects.create(product=product, variant=kilo, image="products/x/kilo-front.jpg", is_primary=True)
+    ProductImage.objects.create(product=product, variant=half, image="products/x/half-front.jpg", sort_order=1)
+
+    row = next(p for p in api_client.get(PRODUCTS_URL).json()["data"]["results"] if p["slug"] == product.slug)
+
+    assert row["secondary_image"] is None

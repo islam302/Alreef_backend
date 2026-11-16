@@ -84,15 +84,21 @@ class ProductListSerializer(serializers.ModelSerializer):
         return ProductImageSerializer(image).data if image else None
 
     def get_secondary_image(self, obj):
-        """The side shot a card crossfades to on hover: the first product-level
-        image after the primary one (by sort order, then upload order). Variant
-        photos are left out — they show a size, not another angle."""
+        """The side shot a card crossfades to on hover: the first image after
+        the primary one (by sort order, then upload order) that shows the same
+        jar from another angle. That is a product-level photo, or, when the
+        shop filed its photos under sizes, another photo of the primary's own
+        size. A photo of a different size is left out — it shows another jar,
+        not another angle."""
         primary = _primary(obj)
-        rest = sorted(
-            (i for i in obj.images.all() if i.variant_id is None and (primary is None or i.pk != primary.pk)),
-            key=lambda i: (i.sort_order, i.pk),
-        )
-        return ProductImageSerializer(rest[0]).data if rest and primary else None
+        if primary is None:
+            return None
+        others = [i for i in obj.images.all() if i.pk != primary.pk]
+        same_jar = [i for i in others if i.variant_id is None] or [
+            i for i in others if primary.variant_id is not None and i.variant_id == primary.variant_id
+        ]
+        same_jar.sort(key=lambda i: (i.sort_order, i.pk))
+        return ProductImageSerializer(same_jar[0]).data if same_jar else None
 
     def get_computed_badges(self, obj):
         badges = list(obj.badges)
