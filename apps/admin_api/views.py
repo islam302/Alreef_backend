@@ -54,6 +54,7 @@ from apps.admin_api.serializers import (
     AdminShippingZoneSerializer,
     AdminStaffSerializer,
     AdminStoreReviewSerializer,
+    AdminChatScreenshotSerializer,
     OrderCancelAdminSerializer,
     OrderNoteSerializer,
     OrderStatusChangeSerializer,
@@ -75,7 +76,7 @@ from apps.inventory.services import get_expired_batches, get_or_create_item
 from apps.orders.models import Order, OrderStatus, ReturnRequest
 from apps.orders.services import change_status_by_staff, complete_return_and_refund, decide_return_request
 from apps.payments.models import Payment
-from apps.reviews.models import Review, StoreReview
+from apps.reviews.models import ChatScreenshot, Review, StoreReview
 from apps.shipping.models import Governorate, ShippingMethod, ShippingRate, ShippingZone
 from apps.shipping.services import save_order_shipment, set_governorate_rate
 from apps.users.models import User
@@ -698,6 +699,17 @@ class AdminStoreReviewViewSet(EnvelopeViewSet):
         if published in {"true", "false"}:
             queryset = queryset.filter(published=published == "true")
         return queryset
+
+
+@extend_schema(tags=["Admin"])
+class AdminChatScreenshotViewSet(EnvelopeViewSet):
+    """Screenshots of what customers wrote to the shop, shown on the homepage.
+    Uploaded as multipart (`image`, optional `caption`); every write audited."""
+
+    serializer_class = AdminChatScreenshotSerializer
+    audit_model_name = "ChatScreenshot"
+    queryset = ChatScreenshot.objects.all()
+    pagination_class = None
 
 
 # ==========================================================================

@@ -11,8 +11,9 @@ from apps.core.response import success_response
 from apps.core.schema import envelope
 from apps.core.validators import validate_image_file
 from apps.reviews import services
-from apps.reviews.models import Review, ReviewImage, StoreReview
+from apps.reviews.models import ChatScreenshot, Review, ReviewImage, StoreReview
 from apps.reviews.serializers import (
+    ChatScreenshotSerializer,
     GuestReviewCreateSerializer,
     LatestReviewSerializer,
     LatestStoreReviewSerializer,
@@ -184,3 +185,23 @@ class ReviewVoteHelpfulView(APIView):
         services.vote_helpful(review=review, user=request.user)
         review.refresh_from_db()
         return success_response(ReviewSerializer(review).data)
+
+
+CHAT_SCREENSHOTS_MAX = 24
+
+
+@extend_schema(tags=["Reviews"], responses=envelope(ChatScreenshotSerializer(many=True), name="ChatScreenshotList"))
+class ChatScreenshotListView(APIView):
+    """
+    GET /api/v1/reviews/screenshots/
+
+    Published screenshots of what customers wrote to the shop, in the order
+    staff set, at most 24. A showcase for the homepage, not an archive.
+    """
+
+    throttle_scope = "catalog"  # public read: apps.core.throttling
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        rows = ChatScreenshot.objects.filter(published=True)[:CHAT_SCREENSHOTS_MAX]
+        return success_response(ChatScreenshotSerializer(rows, many=True, context={"request": request}).data)

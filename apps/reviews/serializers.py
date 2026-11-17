@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.catalog.models import ProductStatus
-from apps.reviews.models import Review, ReviewImage, StoreReview
+from apps.reviews.models import ChatScreenshot, Review, ReviewImage, StoreReview
 
 
 class ReviewImageSerializer(serializers.ModelSerializer):
@@ -153,3 +153,12 @@ class GuestReviewCreateSerializer(serializers.Serializer):
         if not attrs["token"] and not (attrs["order_number"] and attrs["phone"]):
             raise serializers.ValidationError("Send the order's token, or its number and phone.")
         return attrs
+
+
+class ChatScreenshotSerializer(serializers.ModelSerializer):
+    """A published chat screenshot: the picture and an optional caption."""
+
+    class Meta:
+        model = ChatScreenshot
+        fields = ["id", "image", "caption"]
+        read_only_fields = fields

@@ -16,7 +16,7 @@ from apps.coupons.models import Coupon
 from apps.inventory.models import Batch, InventoryItem, InventoryMovement
 from apps.orders.models import Order, OrderItem, OrderStatusHistory, ReturnRequest
 from apps.payments.models import Payment, Refund
-from apps.reviews.models import Review, StoreReview
+from apps.reviews.models import ChatScreenshot, Review, StoreReview
 from apps.shipping.models import (
     Governorate,
     Shipment,
@@ -592,6 +592,25 @@ class AdminReviewSerializer(serializers.ModelSerializer):
 
     def get_is_guest(self, obj) -> bool:
         return not obj.user_id
+
+
+class AdminChatScreenshotSerializer(serializers.ModelSerializer):
+    """A screenshot of a customer's message, uploaded by staff for the homepage."""
+
+    class Meta:
+        model = ChatScreenshot
+        fields = ["id", "image", "caption", "published", "sort_order", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate_caption(self, value):
+        return " ".join(value.split())
+
+    def create(self, validated_data):
+        # A multipart form leaves an unticked box out entirely, which DRF reads
+        # as False; an upload with no say is published, as the model intends.
+        if "published" not in self.initial_data:
+            validated_data["published"] = True
+        return super().create(validated_data)
 
 
 class AdminStoreReviewSerializer(serializers.ModelSerializer):

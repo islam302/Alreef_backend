@@ -100,3 +100,27 @@ class ReviewHelpfulVote(BaseModel):
 
     class Meta:
         unique_together = [("review", "user")]
+
+
+def chat_screenshot_upload_path(instance, filename):
+    return f"reviews/screenshots/{filename}"
+
+
+class ChatScreenshot(BaseModel):
+    """
+    A screenshot of what a customer wrote to the shop (WhatsApp, Instagram…),
+    shown under «آراء عملائنا». Staff upload it from the dashboard and are
+    responsible for cropping out the customer's name, number and photo; the
+    image is published as uploaded.
+    """
+
+    image = models.ImageField(upload_to=chat_screenshot_upload_path, validators=[validate_image_file])
+    caption = models.CharField(max_length=120, blank=True, help_text="Optional, e.g. the product it is about.")
+    published = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "-created_at"]
+
+    def __str__(self):
+        return f"Chat screenshot {self.pk}"

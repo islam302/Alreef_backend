@@ -1,6 +1,7 @@
 from django.urls import path
 
 from apps.reviews.views import (
+    ChatScreenshotListView,
     GuestReviewCreateView,
     LatestReviewListView,
     ProductReviewListView,
@@ -15,5 +16,6 @@ urlpatterns = [
     path("reviews/", ReviewCreateView.as_view(), name="create"),
     path("reviews/guest/", GuestReviewCreateView.as_view(), name="guest-create"),
     path("reviews/latest/", LatestReviewListView.as_view(), name="latest"),
+    path("reviews/screenshots/", ChatScreenshotListView.as_view(), name="screenshots"),
     path("reviews/<int:review_id>/helpful/", ReviewVoteHelpfulView.as_view(), name="helpful"),
 ]
