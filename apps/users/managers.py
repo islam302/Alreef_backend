@@ -7,7 +7,10 @@ class UserManager(BaseUserManager):
     def _create_user(self, email, password, **extra_fields):
         if not email:
             raise ValueError("Users must have an email address.")
-        email = self.normalize_email(email)
+        # Whole address lower-cased, not just the domain (normalize_email): sign
+        # in lowers what is typed, so a social sign-up stored as
+        # "Ahmed.Ali@gmail.com" could never log in with a password.
+        email = self.normalize_email(email).strip().lower()
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)

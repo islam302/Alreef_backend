@@ -22,6 +22,7 @@ from apps.shipping.services import get_available_quotes
 
 @extend_schema(tags=["Shipping"])
 class GovernorateListView(ListAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     queryset = Governorate.objects.filter(is_active=True)
     serializer_class = GovernorateSerializer
     permission_classes = [permissions.AllowAny]
@@ -39,6 +40,7 @@ class GovernorateListView(ListAPIView):
 
 @extend_schema(tags=["Shipping"], parameters=[OpenApiParameter("governorate", str, OpenApiParameter.QUERY)])
 class CityListView(ListAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     serializer_class = CitySerializer
     permission_classes = [permissions.AllowAny]
     pagination_class = None
@@ -67,6 +69,7 @@ class CityListView(ListAPIView):
     responses=ShippingQuoteSerializer(many=True),
 )
 class ShippingQuoteView(APIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):

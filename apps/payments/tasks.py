@@ -132,10 +132,53 @@ def expire_stale_payments_task():
             expired += 1
         except Exception:
             logger.exception("Could not expire payment %s", payment.id)
+            continue
+        try:
+            _cancel_order_of_expired_transfer(payment)
+        except Exception:
+            logger.exception("Could not cancel the order of expired payment %s", payment.id)
 
     if expired:
         logger.info("Expired %s abandoned payment(s)", expired)
     return expired
+
+
+#: Said to the customer (and in the order's history) when an unpaid transfer
+#: order is let go.
+EXPIRED_TRANSFER_CANCEL_REASON = "اتلغى تلقائياً: الدفع ماوصلش في المدة"
+
+
+def _cancel_order_of_expired_transfer(payment) -> None:
+    """
+    Let go of the order an expired transfer or deposit was paying for.
+
+    release_unpaid_orders_task only covers gateway routes, so an InstaPay /
+    Vodafone Cash order (or a COD order waiting for its deposit) that was never
+    paid held its stock and its coupon use for good. Once its transfer has
+    expired, a still-pending order with nothing paid is cancelled through
+    cancel_order, which returns both. A confirmed order is not touched, and a
+    transfer that turns up later can still be recorded (and is flagged for a
+    refund).
+    """
+    from apps.orders.models import OrderStatus
+    from apps.orders.services import cancel_order
+    from apps.payments import state
+    from apps.payments.models import PaymentStatus
+    from apps.payments.services import LATE_RECEIPT_ROUTES
+
+    if payment.provider not in LATE_RECEIPT_ROUTES:
+        return
+    order = payment.order
+    order.refresh_from_db()
+    if order.status != OrderStatus.PENDING:
+        return
+    payments = order.payments.exclude(provider="cod")
+    if payments.filter(status__in=state.SETTLED | {PaymentStatus.AUTHORIZED}).exists():
+        return
+    # Another transfer on the order still open (a retry) keeps it alive.
+    if payments.filter(status__in=state.IN_FLIGHT).exists():
+        return
+    cancel_order(order, reason=EXPIRED_TRANSFER_CANCEL_REASON)
 
 
 #: How long an online order may wait for its payment before its stock goes

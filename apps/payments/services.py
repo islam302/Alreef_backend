@@ -232,7 +232,8 @@ def _record_attempt(payment: Payment, status: str, error_message: str) -> None:
 
 @transaction.atomic
 def mark_payment_captured(
-    payment: Payment, *, note: str = "", from_gateway: bool = False, transaction_reference: str = ""
+    payment: Payment, *, note: str = "", from_gateway: bool = False, transaction_reference: str = "",
+    late_receipt: bool = False,
 ):
     """
     The money is ours. Confirm the order.
@@ -253,10 +254,12 @@ def mark_payment_captured(
     if payment.status == PaymentStatus.CAPTURED:
         return payment  # Idempotent: a re-delivered event confirms nothing twice.
 
-    if from_gateway and payment.status in payment_state.LATE_CAPTURE_FROM:
+    # `late_receipt`: a staff member recording a transfer that arrived after the
+    # payment was written off (record_manual_receipt decides when that is allowed).
+    if (from_gateway or late_receipt) and payment.status in payment_state.LATE_CAPTURE_FROM:
         logger.warning(
-            "payment %s: gateway reports success after we marked it %s; recording the capture",
-            payment.id, payment.status,
+            "payment %s: %s reports success after we marked it %s; recording the capture",
+            payment.id, "gateway" if from_gateway else "staff", payment.status,
         )
         payment.status = PaymentStatus.CAPTURED
         payment.save(update_fields=["status"])
@@ -348,15 +351,20 @@ def mark_payment_failed(payment: Payment, *, error_message: str = ""):
     # After commit: a failure that rolls back must not email, and a broker
     # outage must not undo the recorded failure (notifications.queue_email).
     from apps.notifications.services import queue_email
+    from apps.orders.services import order_email_context
 
+    # The order context, for its guest-safe link: the email used to point every
+    # customer at /account/orders/<n>, which a guest cannot open. The amount is
+    # this payment's (a deposit is not the order total), and says so.
     queue_email(
         to=payment.order.customer_email,
         subject="Payment failed",
         template_name="payment_failed",
         context={
-            "order_number": payment.order.order_number,
-            "amount": str(payment.amount.amount),
+            **order_email_context(payment.order),
+            "amount": f"{payment.amount.amount:.2f}",
             "currency": str(payment.amount.currency),
+            "is_deposit": is_deposit(payment),
         },
         event="payment_failed",
         user_id=payment.order.user_id,
@@ -412,6 +420,9 @@ def mark_payment_expired(payment: Payment, *, reason: str = ""):
 #: endpoints are staff-only.
 MANUALLY_SETTLED_ROUTES = ("cod", "instapay", "vodafone_cash")
 
+#: Manual routes whose money can still arrive after the payment was written off.
+LATE_RECEIPT_ROUTES = ("instapay", "vodafone_cash")
+
 #: Wording per route, so an audit log reads as what actually happened rather than
 #: as a generic state change.
 _MANUAL_NOTES = {
@@ -454,7 +465,15 @@ def record_manual_receipt(payment: Payment, *, actor=None, note: str = ""):
     if payment.status == PaymentStatus.CAPTURED:
         return payment
 
-    payment_state.assert_transition(payment.status, PaymentStatus.CAPTURED)
+    # A transfer that lands after we gave up on it — refused by mistake, expired
+    # by the sweep, or cancelled with its order — is still money we hold, and
+    # refusing to record it left it untracked. The same overrule a gateway gets
+    # (state.LATE_CAPTURE_FROM), for the transfer routes only: cash is collected
+    # at the door, by a delivery. A cancelled order's money is flagged for a
+    # refund by mark_payment_captured.
+    late = payment.provider in LATE_RECEIPT_ROUTES and payment.status in payment_state.LATE_CAPTURE_FROM
+    if not late:
+        payment_state.assert_transition(payment.status, PaymentStatus.CAPTURED)
     wording = _MANUAL_NOTES[payment.provider]
 
     try:
@@ -468,7 +487,7 @@ def record_manual_receipt(payment: Payment, *, actor=None, note: str = ""):
         if not result.success:
             raise ApplicationError(ErrorCodes.PAYMENT_FAILED, "Could not record the payment.")
 
-    payment = mark_payment_captured(payment, note=note or wording["received"])
+    payment = mark_payment_captured(payment, note=note or wording["received"], late_receipt=late)
 
     from apps.audit.models import AuditAction
     from apps.audit.services import record
@@ -1232,6 +1251,24 @@ def assert_customer_may_cancel(order) -> None:
             ErrorCodes.ORDER_ALREADY_PAID,
             "This order is already paid. Contact us to cancel it and get your money back.",
         )
+
+
+def cancel_open_manual_payments(order, *, reason: str = "") -> None:
+    """
+    Close the payments a cancelled order still had open.
+
+    A cancelled order used to leave its unpaid transfer, deposit or COD payment
+    in pending/requires_action: the dashboard kept listing it as money to chase,
+    and the expiry sweep later "expired" a payment for an order that no longer
+    existed. Only the manually settled routes: an in-flight gateway payment is
+    left for reconciliation, which records (and flags) a success that lands late.
+    A transfer that still arrives can be recorded afterwards (record_manual_receipt
+    accepts a written-off payment) and is flagged for a refund.
+    """
+    for payment in order.payments.filter(
+        status__in=payment_state.IN_FLIGHT, provider__in=MANUALLY_SETTLED_ROUTES
+    ):
+        mark_payment_cancelled(payment, reason=(reason or "Order cancelled.")[:500])
 
 
 def flag_paid_cancellation(order) -> None:

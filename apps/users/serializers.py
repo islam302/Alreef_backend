@@ -1,3 +1,5 @@
+import phonenumbers
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from phonenumber_field.serializerfields import PhoneNumberField
@@ -70,8 +72,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ["email", "phone", "first_name", "last_name", "password"]
 
     def validate_email(self, value):
-        value = value.lower()
-        if User.objects.filter(email=value).exists():
+        value = value.strip().lower()
+        # iexact: accounts made before emails were lower-cased on creation may
+        # still be stored mixed-case, and an exact match let a second account
+        # be opened for the same address.
+        if User.objects.filter(email__iexact=value).exists():
             raise ApplicationError(ErrorCodes.AUTH_EMAIL_ALREADY_EXISTS, "An account with this email already exists.")
         return value
 
@@ -88,11 +93,38 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
+def login_email(identifier):
+    """
+    What the customer typed in the sign-in box, as the email to check.
+
+    Emails are stored lower-case, but a phone keyboard capitalises the first
+    letter on its own — so it is lowered and trimmed here. And a customer who
+    only remembers the mobile number they registered with can sign in with it:
+    a phone number is looked up and swapped for that account's email.
+    """
+    value = str(identifier or "").strip()
+    if "@" in value:
+        return value.lower()
+    digits = value.replace(" ", "").replace("-", "")
+    if not digits:
+        return value
+    try:
+        number = phonenumbers.parse(digits, settings.PHONENUMBER_DEFAULT_REGION)
+    except phonenumbers.NumberParseException:
+        return value
+    if not phonenumbers.is_valid_number(number):
+        return value
+    e164 = phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164)
+    user = User.objects.filter(phone=e164).only("email").first()
+    return user.email if user else value
+
+
 class LoginSerializer(TokenObtainPairSerializer):
     username_field = User.USERNAME_FIELD
 
     def validate(self, attrs):
-        email = attrs.get("email")
+        email = login_email(attrs.get("email"))
+        attrs["email"] = email
         password = attrs.get("password")
 
         if email and services.is_login_locked(email):

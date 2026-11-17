@@ -26,8 +26,24 @@ IDEMPOTENCY_HEADER = "Idempotency-Key"
 _LOCK_SENTINEL = "__IN_PROGRESS__"
 
 
-def _cache_key(scope: str, key: str) -> str:
-    return f"idempotency:{scope}:{key}"
+def _cache_key(scope: str, key: str, principal: str = "anon") -> str:
+    return f"idempotency:{scope}:{principal}:{key}"
+
+
+def _principal(request) -> str:
+    """
+    Whose key this is. The cache used to be keyed on the header alone, so
+    anybody who sent the same Idempotency-Key — a leaked or guessed one, or a
+    client generating weak keys — was handed the stored response of somebody
+    else's checkout: their order, their address, a guest's access token. The
+    account, or for a guest the session that owns the cart, now scopes it.
+    """
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        return f"user:{user.pk}"
+    session = getattr(request, "session", None)
+    session_key = getattr(session, "session_key", None) if session is not None else None
+    return f"session:{session_key}" if session_key else "anon"
 
 
 def _body_fingerprint(request) -> str:
@@ -62,7 +78,7 @@ class IdempotentRequestMixin:
             )
 
         scope = self.idempotency_scope or self.__class__.__name__
-        cache_key = _cache_key(scope, key)
+        cache_key = _cache_key(scope, key, _principal(request))
         fingerprint = _body_fingerprint(request)
         ttl = self.idempotency_ttl_seconds or settings.IDEMPOTENCY_KEY_TTL_SECONDS
 

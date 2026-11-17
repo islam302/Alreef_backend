@@ -31,3 +31,4 @@ node_modules/
 # tooling caches
 .ruff_cache/
 .mypy_cache/
+.hypothesis/

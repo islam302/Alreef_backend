@@ -58,11 +58,13 @@ Totals breakdown (`apps/checkout/services.py:calculate_totals`):
 1. `subtotal` = sum of cart line totals (`unit_price_snapshot × quantity`)
 2. `promotion_discount` = automatic promotions engine result (`apps.promotions.services.compute_promotions_for_items`) — may also flag `free_shipping`
 3. `coupon_discount` = if `coupon_code` given, computed via `apps.coupons.services.compute_discount`; a coupon of `discount_type=free_shipping` also forces `free_shipping=true`
-4. `discounted_subtotal = subtotal − coupon_discount − promotion_discount` (floored at 0)
-5. `tax_total` = per line item, `line_total × EGYPT_VAT_RATE` (default 14%) **only** for items whose product `tax_category=standard`; `zero_rated`/`exempt` products contribute 0 tax
+4. The discounts are capped at the subtotal — `promotion_discount` first, `coupon_discount` takes what is left — so `coupon_discount + promotion_discount ≤ subtotal`, and `discounted_subtotal = subtotal − coupon_discount − promotion_discount` (never below 0). The stored discounts are the capped ones, so the order always reconciles.
+5. `tax_total` = VAT on what the customer actually pays for each line. The order-level discounts are allocated across the lines they apply to (a scoped coupon/promotion only over its own products) in proportion to the line totals, rounded to piastres with the remainder on the last line; each line then pays `(line_total − its discount share) × EGYPT_VAT_RATE` (default 14%, rounded per line) **only** if its product has `tax_category=standard` (`zero_rated`/`exempt` contribute 0). Each order item stores its share in `discount_amount` and its VAT in `tax_amount`; a return refunds `(line_total − discount_amount + tax_amount)` pro rata to the quantity returned, capped at what was captured.
 6. `shipping_total` = quote from `apps.shipping.services.get_quote_for_method` for the chosen method + address governorate, unless `free_shipping` is true (then 0)
 7. `cod_fee` = flat `COD_FEE_AMOUNT` (default 15.00 EGP) only when `payment_method=cod`; raises if COD is disabled server-side
 8. `grand_total = discounted_subtotal + tax_total + shipping_total + cod_fee`
+
+Every amount is printed with two decimals (`"0.00"`, never `"0"`), the same shape as the created order.
 
 Errors: `CART_EMPTY` (400), `ADDRESS_NOT_FOUND` (404), `SHIPPING_METHOD_NOT_FOUND` (404), `SHIPPING_UNAVAILABLE` (409), `INVALID_COUPON` / `COUPON_EXPIRED` / `COUPON_USAGE_LIMIT_REACHED` / `COUPON_MINIMUM_NOT_MET` / `COUPON_NOT_APPLICABLE`, `PAYMENT_PROVIDER_UNAVAILABLE` (503, COD disabled).
 

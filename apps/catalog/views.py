@@ -50,7 +50,16 @@ class ProductListView(ListAPIView):
     filter_backends = [DjangoFilterBackend, SearchFilter, StoreOrderingFilter]
     ordering_fields = ["price", "created_at", "name_en"]
     ordering = RECOMMENDED_ORDERING
-    throttle_scope = "search"
+
+    # Browsing the shelves (home sections, a category, the shop page) is a
+    # public read budgeted as "catalog"; a free-text search keeps the stricter
+    # "search" budget (chosen per request in `initial`, before the throttles run).
+    throttle_scope = "catalog"
+
+    def initial(self, request, *args, **kwargs):
+        if request.query_params.get("search"):
+            self.throttle_scope = "search"
+        super().initial(request, *args, **kwargs)
 
     def get_queryset(self):
         return _published_products().annotate(
@@ -73,6 +82,7 @@ class ProductListView(ListAPIView):
 
 @extend_schema(tags=["Products"])
 class ProductDetailView(RetrieveAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     serializer_class = ProductDetailSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = "slug"
@@ -125,6 +135,7 @@ class RelatedProductsView(APIView):
     """Rule-based: same category, excluding self, featured first. Architecture
     supports swapping in ML-based recommendations later without changing the
     endpoint contract (spec §27)."""
+    throttle_scope = "catalog"  # public read: apps.core.throttling
 
     permission_classes = [permissions.AllowAny]
 
@@ -143,6 +154,7 @@ class RelatedProductsView(APIView):
 
 @extend_schema(tags=["Products"], responses=envelope(ProductListSerializer, many=True, name="RecentlyViewed"))
 class RecentlyViewedView(APIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):

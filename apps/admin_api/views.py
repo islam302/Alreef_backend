@@ -73,7 +73,7 @@ from apps.coupons.models import Coupon
 from apps.inventory.models import Batch, InventoryItem, InventoryMovement
 from apps.inventory.services import get_expired_batches, get_or_create_item
 from apps.orders.models import Order, OrderStatus, ReturnRequest
-from apps.orders.services import complete_return_and_refund, decide_return_request, transition_status
+from apps.orders.services import change_status_by_staff, complete_return_and_refund, decide_return_request
 from apps.payments.models import Payment
 from apps.reviews.models import Review, StoreReview
 from apps.shipping.models import Governorate, ShippingMethod, ShippingRate, ShippingZone
@@ -82,10 +82,23 @@ from apps.users.models import User
 
 
 def _parse_date_range(request):
-    """Shared ?date_from=&date_to= handling. Returns (from, to) as dates or None."""
-    return parse_date(request.query_params.get("date_from", "") or ""), parse_date(
-        request.query_params.get("date_to", "") or ""
-    )
+    """
+    Shared ?date_from=&date_to= handling. Returns (from, to) as dates or None.
+
+    parse_date raises ValueError for a well-formed but impossible date
+    ("2026-13-45"), which surfaced as a 500; it is a bad request.
+    """
+    dates = []
+    for name in ("date_from", "date_to"):
+        raw = request.query_params.get(name, "") or ""
+        try:
+            value = parse_date(raw)
+        except ValueError:
+            value = None
+        if raw and value is None:
+            raise ApplicationError(ErrorCodes.VALIDATION_ERROR, f"{name} must be a date (YYYY-MM-DD).")
+        dates.append(value)
+    return tuple(dates)
 
 
 # ==========================================================================
@@ -178,7 +191,7 @@ class AdminOrderViewSet(ReadOnlyEnvelopeViewSet):
         order = self.get_object()
         serializer = OrderStatusChangeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        order = transition_status(
+        order = change_status_by_staff(
             order,
             serializer.validated_data["status"],
             changed_by=request.user,

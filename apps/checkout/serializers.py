@@ -1,6 +1,7 @@
 from phonenumber_field.serializerfields import PhoneNumberField
 from rest_framework import serializers
 
+from apps.core.money import quantize_money
 from apps.orders.models import PaymentMethodSnapshot
 from apps.orders.serializers import OrderDetailSerializer
 from apps.shipping.models import City, Governorate
@@ -9,7 +10,7 @@ from apps.users.models import Address
 
 class CheckoutInputSerializer(serializers.Serializer):
     address_id = serializers.IntegerField()
-    shipping_method_id = serializers.IntegerField()
+    shipping_method_id = serializers.IntegerField(min_value=1)
     payment_method = serializers.ChoiceField(choices=PaymentMethodSnapshot.choices)
     coupon_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
@@ -70,7 +71,7 @@ class GuestAddressSerializer(serializers.ModelSerializer):
 class GuestCheckoutInputSerializer(serializers.Serializer):
     contact = GuestContactSerializer()
     address = GuestAddressSerializer()
-    shipping_method_id = serializers.IntegerField()
+    shipping_method_id = serializers.IntegerField(min_value=1)
     payment_method = serializers.ChoiceField(choices=PaymentMethodSnapshot.choices)
     coupon_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
@@ -95,13 +96,18 @@ class GuestCheckoutSummarySerializer(serializers.Serializer):
 
     governorate = serializers.PrimaryKeyRelatedField(queryset=Governorate.objects.filter(is_active=True))
     phone = PhoneNumberField(required=False, allow_null=True, default=None)
-    shipping_method_id = serializers.IntegerField()
+    shipping_method_id = serializers.IntegerField(min_value=1)
     payment_method = serializers.ChoiceField(choices=PaymentMethodSnapshot.choices)
     coupon_code = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
 
     def build_address(self) -> Address:
         data = self.validated_data
         return Address(governorate=data["governorate"], phone=data.get("phone") or "")
+
+
+def _amount(money) -> str:
+    """Two decimals always, the way the order prints the same figure ("0.00", never "0")."""
+    return str(quantize_money(money).amount)
 
 
 class CheckoutTotalsSerializer(serializers.Serializer):
@@ -119,31 +125,31 @@ class CheckoutTotalsSerializer(serializers.Serializer):
     due_on_delivery = serializers.SerializerMethodField()
 
     def get_deposit_amount(self, obj) -> str | None:
-        return str(obj.deposit.amount) if obj.deposit is not None else None
+        return _amount(obj.deposit) if obj.deposit is not None else None
 
     def get_due_on_delivery(self, obj) -> str | None:
-        return str(obj.due_on_delivery.amount) if obj.due_on_delivery is not None else None
+        return _amount(obj.due_on_delivery) if obj.due_on_delivery is not None else None
 
     def get_subtotal(self, obj):
-        return str(obj.subtotal.amount)
+        return _amount(obj.subtotal)
 
     def get_coupon_discount(self, obj):
-        return str(obj.coupon_discount.amount)
+        return _amount(obj.coupon_discount)
 
     def get_promotion_discount(self, obj):
-        return str(obj.promotion_discount.amount)
+        return _amount(obj.promotion_discount)
 
     def get_tax_total(self, obj):
-        return str(obj.tax_total.amount)
+        return _amount(obj.tax_total)
 
     def get_shipping_total(self, obj):
-        return str(obj.shipping_total.amount)
+        return _amount(obj.shipping_total)
 
     def get_cod_fee(self, obj):
-        return str(obj.cod_fee.amount)
+        return _amount(obj.cod_fee)
 
     def get_grand_total(self, obj):
-        return str(obj.grand_total.amount)
+        return _amount(obj.grand_total)
 
     def get_currency(self, obj):
         return str(obj.grand_total.currency)

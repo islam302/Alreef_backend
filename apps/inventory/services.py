@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Sum
 from django.utils import timezone
 
 from apps.core.error_codes import ApplicationError, ErrorCodes
@@ -13,6 +13,7 @@ from apps.inventory.models import (
     InventoryMovementType,
     StockReservation,
     StockReservationStatus,
+    sellable_batch_q,
 )
 
 DEFAULT_RESERVATION_TTL_MINUTES = 30
@@ -43,10 +44,24 @@ def reserve_stock(*, variant, quantity: int, cart_id=None, order=None, ttl_minut
             details={"variant_id": variant.id, "available": available, "requested": quantity},
         )
 
+    # A batch expiring today is not sellable: consume_reservation refuses it, so
+    # reserving it only failed the order later, at confirmation.
     batches = (
         Batch.objects.select_for_update()
         .filter(item=item, is_active=True, quantity__gt=0)
+        .filter(sellable_batch_q())
         .order_by(F("expiration_date").asc(nulls_last=True), "received_at")
+    )
+
+    # A reservation does not take units out of `batch.quantity` (consuming it
+    # does), so a batch's free units are its quantity minus its active holds.
+    # Taking `batch.quantity` alone booked the same jars to two orders, and the
+    # second confirmation drove the batch negative.
+    held = dict(
+        StockReservation.objects.filter(item=item, status=StockReservationStatus.ACTIVE, batch__isnull=False)
+        .values("batch_id")
+        .annotate(total=Sum("quantity"))
+        .values_list("batch_id", "total")
     )
 
     remaining = quantity
@@ -56,7 +71,7 @@ def reserve_stock(*, variant, quantity: int, cart_id=None, order=None, ttl_minut
     for batch in batches:
         if remaining <= 0:
             break
-        take = min(batch.quantity, remaining)
+        take = min(batch.quantity - held.get(batch.pk, 0), remaining)
         if take <= 0:
             continue
         reservation = StockReservation.objects.create(
@@ -129,6 +144,69 @@ def consume_reservation(reservation: StockReservation):
     )
 
 
+def consume_for_confirmation(reservation: StockReservation) -> bool:
+    """
+    Consume a confirmed order's hold without ever failing the confirmation.
+
+    Reached when the money has arrived (a gateway capture, a recorded
+    transfer). If the reserved batch hit its expiry date while the customer was
+    paying, consume_reservation refuses it — and that refusal used to roll the
+    whole capture back inside the webhook: the payment was never recorded and
+    the gateway retried forever. The hold is moved to another sellable batch
+    with free units; when none has room it stays active and is reported for a
+    person to resolve (an active hold on a confirmed order is what the
+    invariants check looks for). Returns True when the units were consumed.
+    """
+    try:
+        consume_reservation(reservation)
+        return True
+    except ApplicationError as exc:
+        if exc.code != ErrorCodes.NO_VALID_BATCH:
+            raise
+
+    with transaction.atomic():
+        locked = StockReservation.objects.select_for_update().get(pk=reservation.pk)
+        InventoryItem.objects.select_for_update().get(pk=locked.item_id)
+        held = dict(
+            StockReservation.objects.filter(item_id=locked.item_id, status=StockReservationStatus.ACTIVE, batch__isnull=False)
+            .exclude(pk=locked.pk)
+            .values("batch_id")
+            .annotate(total=Sum("quantity"))
+            .values_list("batch_id", "total")
+        )
+        candidates = (
+            Batch.objects.select_for_update()
+            .filter(item_id=locked.item_id, is_active=True, quantity__gt=0)
+            .filter(sellable_batch_q())
+            .exclude(pk=locked.batch_id)
+            .order_by(F("expiration_date").asc(nulls_last=True), "received_at")
+        )
+        replacement = next(
+            (b for b in candidates if b.quantity - held.get(b.pk, 0) >= locked.quantity), None
+        )
+        if replacement is not None:
+            locked.batch = replacement
+            locked.save(update_fields=["batch"])
+    if replacement is not None:
+        consume_reservation(locked)
+        return True
+
+    import logging
+
+    from apps.audit.models import AuditAction
+    from apps.audit.services import record
+
+    logging.getLogger(__name__).error(
+        "order %s: reservation %s is on an expired batch and no other batch has %s free unit(s); "
+        "left active for staff", reservation.order_id, reservation.pk, reservation.quantity,
+    )
+    record(
+        actor=None, action=AuditAction.STATUS_CHANGE, model_name="StockReservation", object_id=reservation.pk,
+        changes={"needs_attention": True, "reason": "Reserved batch expired before the order was paid; no replacement batch."},
+    )
+    return False
+
+
 @transaction.atomic
 def release_expired_reservations():
     expired = StockReservation.objects.select_for_update().filter(
@@ -161,4 +239,6 @@ def get_batches_nearing_expiration(thresholds_days=None):
 
 
 def get_expired_batches():
-    return Batch.objects.filter(is_active=True, quantity__gt=0, expiration_date__lt=timezone.localdate())
+    # `lte`, matching sellable_batch_q: a batch is no longer sold on its expiry
+    # date, so the sweep takes it off sale that day rather than the next.
+    return Batch.objects.filter(is_active=True, quantity__gt=0, expiration_date__lte=timezone.localdate())

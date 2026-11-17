@@ -106,3 +106,46 @@ def expire_stale_points():
         account.save(update_fields=["points_balance"])
         count += 1
     return count
+
+
+@transaction.atomic
+def reverse_points_for_order(order, *, note: str, fraction=1):
+    """
+    Take back points an order earned that it no longer deserves.
+
+    Points are awarded at confirmation — for COD that is at checkout, before a
+    piastre is paid — and nothing took them back when the order was cancelled
+    or refunded, so a cancelled order still paid out its points. `fraction` is
+    the share of the order given back (1 for a cancellation). Idempotent on
+    `note`, which names the event; never drives the balance below zero (points
+    already spent or expired stay gone).
+    """
+    from decimal import Decimal
+
+    if order.user_id is None:
+        return 0
+    earned = LoyaltyTransaction.objects.filter(
+        order=order, transaction_type=LoyaltyTransactionType.EARN
+    ).first()
+    if earned is None:
+        return 0
+    account = LoyaltyAccount.objects.select_for_update().get(pk=earned.account_id)
+    if LoyaltyTransaction.objects.filter(
+        account=account, order=order, transaction_type=LoyaltyTransactionType.ADJUST, note=note
+    ).exists():
+        return 0
+    already = -sum(
+        LoyaltyTransaction.objects.filter(
+            account=account, order=order, transaction_type=LoyaltyTransactionType.ADJUST, points__lt=0
+        ).values_list("points", flat=True)
+    )
+    wanted = int((Decimal(earned.points) * Decimal(str(fraction))).to_integral_value())
+    points = max(0, min(wanted, earned.points - already, account.points_balance))
+    if points <= 0:
+        return 0
+    LoyaltyTransaction.objects.create(
+        account=account, transaction_type=LoyaltyTransactionType.ADJUST, points=-points, order=order, note=note[:255],
+    )
+    account.points_balance -= points
+    account.save(update_fields=["points_balance"])
+    return points

@@ -122,14 +122,16 @@ def test_frontend_url_helper_cannot_be_moved_off_the_configured_origin(settings,
 # ===========================================================================
 
 
-def test_password_reset_does_not_reveal_whether_an_email_is_registered(api_client, user):
-    """Same status, same message, both ways — otherwise the endpoint is a
-    free membership oracle for a credential-stuffing list."""
-    known = api_client.post(RESET_URL, {"email": user.email}, format="json")
+def test_password_reset_says_when_no_account_uses_the_email(api_client, user):
+    """A customer who typed the wrong address is told so, instead of waiting
+    for an email that never comes. Registration already reveals whether an
+    email is taken; the auth throttle is what limits guessing."""
+    known = api_client.post(RESET_URL, {"email": user.email.upper()}, format="json")
     unknown = api_client.post(RESET_URL, {"email": "nobody@example.com"}, format="json")
 
-    assert known.status_code == unknown.status_code == 200
-    assert known.json()["message"] == unknown.json()["message"]
+    assert known.status_code == 200
+    assert unknown.status_code == 404
+    assert unknown.json()["errors"]["code"] == "AUTH_EMAIL_NOT_FOUND"
 
 
 def test_a_password_reset_token_works_once(api_client, user):
@@ -700,3 +702,20 @@ def test_registration_rejects_a_weak_password(api_client):
     )
     assert response.status_code >= 400
     assert not User.objects.filter(email="weak@example.com").exists()
+
+
+def test_login_ignores_email_case_and_accepts_the_registered_phone(api_client, user):
+    """Phone keyboards capitalise the first letter of an email, and many
+    customers remember only the number they signed up with."""
+    from apps.users.models import User
+
+    user.set_password("Login-Pass-2026!x")
+    user.phone = "+201012345678"
+    user.save()
+    LOGIN = "/api/v1/auth/login/"
+    for typed in (user.email.capitalize(), f"  {user.email.upper()} ", "01012345678", "+20 101 234 5678"):
+        r = api_client.post(LOGIN, {"email": typed, "password": "Login-Pass-2026!x"}, format="json")
+        assert r.status_code == 200, (typed, r.json())
+    bad = api_client.post(LOGIN, {"email": "01099999999", "password": "Login-Pass-2026!x"}, format="json")
+    assert bad.status_code == 401
+    assert User.objects.filter(pk=user.pk).exists()

@@ -44,6 +44,7 @@ class PaymentMethodsView(APIView):
     so it goes to staff through the dashboard and to the operator through
     `manage.py check_payments` — never to the public.
     """
+    throttle_scope = "catalog"  # public read: apps.core.throttling
 
     permission_classes = [permissions.AllowAny]
 

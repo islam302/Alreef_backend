@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.attributes.serializers import AttributeValueSerializer
@@ -83,6 +84,7 @@ class ProductListSerializer(serializers.ModelSerializer):
         image = _primary(obj)
         return ProductImageSerializer(image).data if image else None
 
+    @extend_schema_field(ProductImageSerializer(allow_null=True))
     def get_secondary_image(self, obj):
         """The side shot a card crossfades to on hover: the first image after
         the primary one (by sort order, then upload order) that shows the same

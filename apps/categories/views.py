@@ -15,6 +15,7 @@ from apps.core.schema import envelope
 
 @extend_schema(tags=["Categories"])
 class CategoryListView(ListAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategoryListSerializer
     permission_classes = [permissions.AllowAny]
@@ -29,6 +30,7 @@ class CategoryListView(ListAPIView):
 
 @extend_schema(tags=["Categories"], responses=envelope(CategoryTreeSerializer, many=True, name="CategoryTree"))
 class CategoryTreeView(APIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -38,6 +40,7 @@ class CategoryTreeView(APIView):
 
 @extend_schema(tags=["Categories"])
 class CategoryDetailView(RetrieveAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategoryDetailSerializer
     permission_classes = [permissions.AllowAny]

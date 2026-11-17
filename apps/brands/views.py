@@ -9,6 +9,7 @@ from apps.core.response import success_response
 
 @extend_schema(tags=["Brands"])
 class BrandListView(ListAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     queryset = Brand.objects.filter(is_active=True)
     serializer_class = BrandSerializer
     permission_classes = [permissions.AllowAny]
@@ -22,6 +23,7 @@ class BrandListView(ListAPIView):
 
 @extend_schema(tags=["Brands"])
 class BrandDetailView(RetrieveAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     queryset = Brand.objects.filter(is_active=True)
     serializer_class = BrandSerializer
     permission_classes = [permissions.AllowAny]

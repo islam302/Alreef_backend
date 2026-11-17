@@ -125,7 +125,7 @@ A few totals arithmetic notes, so your line items add up:
 
 - `grand_total` = `subtotal` − `coupon_discount` − `promotion_discount` + `tax_total` +
   `shipping_total` + `cod_fee`, floored at zero for the discounted subtotal.
-- `tax_total` is computed on the **undiscounted** line totals.
+- `tax_total` is computed on what the customer pays for each line, after its share of the coupon and promotion discounts.
 - `free_shipping: true` means a promotion or a `free_shipping` coupon zeroed the shipping
   line — `shipping_total` will already be `"0.00"`. Show the original quote struck
   through if you want to make the saving visible.

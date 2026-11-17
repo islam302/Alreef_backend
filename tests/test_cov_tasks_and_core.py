@@ -388,7 +388,7 @@ def test_user_manager_rules():
         User.objects.create_user(email="", password="x")
     admin = User.objects.create_superuser(email="Boss@Example.COM", password="SuperSecret123")
     assert admin.is_staff and admin.is_superuser and admin.email_verified
-    assert admin.email == "Boss@example.com"
+    assert admin.email == "boss@example.com"  # the whole address, not just the domain
     with pytest.raises(ValueError):
         User.objects.create_superuser(email="a@b.c", password="x", is_staff=False)
     with pytest.raises(ValueError):

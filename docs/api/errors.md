@@ -98,6 +98,8 @@ HTTP status: `400`.
 | `ORDER_NOT_FOUND` | 404 | `order_number` not found/not owned by caller |
 | `ORDER_CANNOT_CANCEL` | 409 | Order's current status doesn't allow `cancelled` as a next state |
 | `ORDER_INVALID_TRANSITION` | 409 | Any other disallowed status transition (incl. return-request preconditions) |
+| `ORDER_PAYMENT_NOT_SETTLED` | 409 | Confirming an order whose transfer, deposit or online payment has not been received |
+| `ORDER_STATUS_HAS_OWN_FLOW` | 409 | The admin status change was asked for a status with its own endpoint (cancel, returns, refunds) |
 | `PAYMENT_FAILED` | 402 | Provider rejected payment creation |
 | `PAYMENT_EXPIRED` | 410 | Payment session/link expired |
 | `PAYMENT_AMOUNT_MISMATCH` | 409 | Webhook-reported amount disagrees with the stored payment |
@@ -114,6 +116,7 @@ HTTP status: `400`.
 | `GIFT_CARD_EXPIRED` | 400 | Gift card past expiry |
 | `GIFT_CARD_INSUFFICIENT_BALANCE` | 409 | Gift card balance too low for the requested use |
 | `LOYALTY_INSUFFICIENT_POINTS` | 409 | Not enough loyalty points for the requested redemption |
+| `LOYALTY_REDEMPTION_UNAVAILABLE` | 409 | Redeeming points is switched off until checkout can apply them |
 | `REVIEW_NOT_ELIGIBLE` | 403 | Caller hasn't purchased/received the product being reviewed |
 | `REVIEW_ALREADY_EXISTS` | 409 | Caller already reviewed this product |
 

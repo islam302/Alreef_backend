@@ -42,6 +42,7 @@ class SiteBundleView(APIView):
     the footer and every SEO block are built from it, so the storefront
     should fetch it once and cache it client-side.
     """
+    throttle_scope = "catalog"  # public read: apps.core.throttling
 
     permission_classes = [permissions.AllowAny]
 
@@ -58,6 +59,7 @@ class SiteBundleView(APIView):
 @extend_schema(tags=["Content"], responses=PageListSerializer(many=True))
 class PageListView(APIView):
     """Published pages, for the footer nav and sitemap. Deliberately unpaginated."""
+    throttle_scope = "catalog"  # public read: apps.core.throttling
 
     permission_classes = [permissions.AllowAny]
 
@@ -68,6 +70,7 @@ class PageListView(APIView):
 
 @extend_schema(tags=["Content"])
 class PageDetailView(RetrieveAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     serializer_class = PageSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = "slug"
@@ -85,6 +88,7 @@ class FaqListView(APIView):
     Active FAQ items in display order. Unpaginated: the page renders all of
     them at once and emits FAQPage structured data from the same list.
     """
+    throttle_scope = "catalog"  # public read: apps.core.throttling
 
     permission_classes = [permissions.AllowAny]
 

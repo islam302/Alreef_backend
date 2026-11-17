@@ -27,6 +27,7 @@ LATEST_REVIEWS_MAX = 20
 
 @extend_schema(tags=["Reviews"])
 class ProductReviewListView(ListAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     serializer_class = ReviewSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -54,6 +55,7 @@ class LatestReviewListView(APIView):
     more than 20. A plain list, not paginated: it is a showcase, not an
     archive (the full set stays on each product's own reviews endpoint).
     """
+    throttle_scope = "catalog"  # public read: apps.core.throttling
 
     permission_classes = [permissions.AllowAny]
 

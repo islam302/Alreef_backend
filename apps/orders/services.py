@@ -52,7 +52,9 @@ def generate_order_number() -> str:
     with connection.cursor() as cursor:
         cursor.execute(f"SELECT nextval('{ORDER_NUMBER_SEQUENCE}')")
         seq = cursor.fetchone()[0]
-    return f"ORD-{timezone.now().strftime('%Y%m%d')}-{seq:05d}"
+    # Local (Cairo) date: in UTC an order placed after midnight Cairo time
+    # carried yesterday's date for two or three hours.
+    return f"ORD-{timezone.localtime().strftime('%Y%m%d')}-{seq:05d}"
 
 
 def create_order_with_unique_number(**fields) -> Order:
@@ -92,6 +94,8 @@ def transition_status(order: Order, new_status: str, *, changed_by=None, note: s
             ErrorCodes.ORDER_INVALID_TRANSITION,
             f"Cannot move order from '{order.status}' to '{new_status}'.",
         )
+    if new_status == OrderStatus.CONFIRMED:
+        _assert_payment_settled_for_confirmation(order)
 
     from_status = order.status
     order.status = new_status
@@ -123,6 +127,78 @@ def transition_status(order: Order, new_status: str, *, changed_by=None, note: s
     return order
 
 
+def _assert_payment_settled_for_confirmation(order: Order) -> None:
+    """
+    An order paid by anything but cash at the door is confirmed by its money.
+
+    The dashboard's status button reached CONFIRMED (and from there delivery)
+    on an InstaPay/Vodafone Cash transfer, a COD deposit or a card payment that
+    had never arrived, so an unpaid order could ship. Every legitimate route —
+    record_manual_receipt, a gateway capture — settles the payment first and
+    then confirms, so it passes here. Plain COD (no other payment) is confirmed
+    on a promise, as before.
+    """
+    from apps.payments import state as payment_state
+    from apps.payments.models import PaymentStatus
+
+    non_cash = list(order.payments.exclude(provider="cod").values_list("status", flat=True))
+    if not non_cash:
+        return
+    paid = payment_state.SETTLED | {PaymentStatus.AUTHORIZED}
+    if not any(status in paid for status in non_cash):
+        raise ApplicationError(
+            ErrorCodes.ORDER_PAYMENT_NOT_SETTLED,
+            "This order's payment has not been received. Record the transfer (or wait for the "
+            "gateway) and the order is confirmed with it.",
+        )
+
+
+#: Statuses the plain status change must not set: each has a flow of its own
+#: that does the work the status implies (refunds, returns), and setting the
+#: status alone skipped it. Cancelling goes through cancel_order instead.
+STATUSES_WITH_OWN_FLOW = {
+    OrderStatus.RETURN_REQUESTED: "a return is opened by the customer (POST /orders/{n}/returns/)",
+    OrderStatus.RETURNED: "use the returns endpoints (/admin-api/returns/{id}/decide/ and /complete/)",
+    OrderStatus.REFUNDED: "use /admin-api/returns/{id}/complete/ or a payment refund",
+    OrderStatus.PARTIALLY_REFUNDED: "use /admin-api/returns/{id}/complete/ or a payment refund",
+}
+
+#: Moves out of a status that another flow owns. An order in RETURN_REQUESTED
+#: has an open ReturnRequest; setting it back to delivered here left that
+#: request open as "requested" on a delivered order. Rejecting the return
+#: (decide_return_request) is what moves it back.
+TRANSITIONS_WITH_OWN_FLOW = {
+    (OrderStatus.RETURN_REQUESTED, OrderStatus.DELIVERED):
+        "an open return is resolved through the returns flow (/admin-api/returns/{id}/decide/ — "
+        "rejecting it returns the order to delivered)",
+}
+
+
+def change_status_by_staff(order: Order, new_status: str, *, changed_by=None, note: str = "") -> Order:
+    """
+    The dashboard's status change, routed through the flow each status owns.
+
+    Setting `cancelled` here used to skip cancel_order — the stock stayed held
+    or consumed, the coupon use stayed spent and paid money was never flagged
+    for a refund — and the return/refund statuses could be set with no return
+    or refund behind them.
+    """
+    if new_status in STATUSES_WITH_OWN_FLOW:
+        raise ApplicationError(
+            ErrorCodes.ORDER_STATUS_HAS_OWN_FLOW,
+            f"'{new_status}' cannot be set directly: {STATUSES_WITH_OWN_FLOW[new_status]}.",
+        )
+    flow = TRANSITIONS_WITH_OWN_FLOW.get((order.status, new_status))
+    if flow:
+        raise ApplicationError(
+            ErrorCodes.ORDER_STATUS_HAS_OWN_FLOW,
+            f"'{order.status}' cannot be changed to '{new_status}' directly: {flow}.",
+        )
+    if new_status == OrderStatus.CANCELLED:
+        return cancel_order(order, reason=note or "Cancelled by staff.", cancelled_by=changed_by)
+    return transition_status(order, new_status, changed_by=changed_by, note=note)
+
+
 @transaction.atomic
 def cancel_order(order: Order, *, reason: str, cancelled_by=None) -> Order:
     if not order.can_cancel():
@@ -147,9 +223,16 @@ def cancel_order(order: Order, *, reason: str, cancelled_by=None) -> Order:
 
     # Money already taken online stays taken until someone refunds it. Say so on
     # the payment, where the refund button is, instead of leaving it to memory.
-    from apps.payments.services import flag_paid_cancellation
+    from apps.payments.services import cancel_open_manual_payments, flag_paid_cancellation
 
     flag_paid_cancellation(order)
+    cancel_open_manual_payments(order, reason=reason)
+
+    # Points are earned at confirmation (for COD, before anything is paid); a
+    # cancelled order keeps none of them.
+    from apps.loyalty.services import reverse_points_for_order
+
+    reverse_points_for_order(order, note=f"Reversed: order {order.order_number} cancelled")
     return order
 
 
@@ -320,6 +403,17 @@ def _dispatch_status_notification(order: Order, new_status: str):
         context["was_paid"] = order.payments.filter(
             status__in=[PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED]
         ).exists()
+    elif new_status == OrderStatus.SHIPPED:
+        # The template has always had a place for the carrier and tracking
+        # number; nothing filled it, so no shipped email ever showed them.
+        shipment = order.shipments.order_by("-created_at").first()
+        if shipment is not None:
+            carrier = shipment.carrier_code or shipment.shipping_method.carrier_code
+            context.update({
+                "carrier": "" if carrier in ("", "manual", "self") else carrier,
+                "tracking_number": shipment.tracking_number,
+                "tracking_url": shipment.tracking_url,
+            })
     queue_email(
         to=order.customer_email, subject=template_name, template_name=template_name,
         context=context, event=event, user_id=order.user_id,
@@ -344,7 +438,7 @@ def create_return_request(*, order: Order, user, reason: str, description: str, 
     )
     for order_item_id, quantity in order_item_quantities.items():
         order_item = order.items.filter(pk=order_item_id).first()
-        if not order_item or quantity > order_item.quantity:
+        if not order_item or quantity < 1 or quantity > order_item.quantity:
             raise ApplicationError(ErrorCodes.VALIDATION_ERROR, f"Invalid order item/quantity: {order_item_id}")
         ReturnItem.objects.create(return_request=return_request, order_item=order_item, quantity=quantity)
 
@@ -370,8 +464,6 @@ def decide_return_request(*, return_request: ReturnRequest, approve: bool, decid
 
 @transaction.atomic
 def complete_return_and_refund(*, return_request: ReturnRequest, processed_by, destination="original_method"):
-    from apps.payments.services import create_refund
-
     # Only an approved return is refunded. The dashboard hides the button
     # otherwise, but the server must not rely on that: completing a rejected
     # return while a later one is open used to refund the rejected items.
@@ -385,16 +477,113 @@ def complete_return_and_refund(*, return_request: ReturnRequest, processed_by, d
     return_request.save(update_fields=["status"])
     order = transition_status(order, OrderStatus.RETURNED, changed_by=processed_by)
 
-    refund_amount = sum(
-        (item.order_item.unit_price * item.quantity for item in return_request.items.select_related("order_item")),
-        start=Money(0, order.currency),
-    )
-    payment = order.payments.order_by("-created_at").first()
-    if payment and refund_amount.amount > 0:
-        create_refund(payment=payment, amount=refund_amount, reason=f"Return #{return_request.id}", destination=destination)
+    refund_amount = _return_value(order, return_request)
+    payments = list(order.payments.all())
+    if payments and refund_amount.amount > 0:
+        refund_amount = _refund_across_payments(
+            order, payments, refund_amount, reason=f"Return #{return_request.id}", destination=destination,
+        )
 
     new_status = OrderStatus.PARTIALLY_REFUNDED if refund_amount < order.grand_total else OrderStatus.REFUNDED
     order = transition_status(order, new_status, changed_by=processed_by)
+
+    from apps.loyalty.services import reverse_points_for_order
+
+    if order.grand_total.amount > 0:
+        reverse_points_for_order(
+            order, note=f"Reversed: return #{return_request.id}",
+            fraction=min(refund_amount.amount / order.grand_total.amount, 1),
+        )
     return_request.status = ReturnRequestStatus.REFUNDED
     return_request.save(update_fields=["status"])
     return return_request
+
+
+def _return_value(order: Order, return_request: ReturnRequest) -> Money:
+    """
+    What the returned lines were actually paid for: their share of the line
+    after the order's coupon and promotion discounts, plus the VAT charged on
+    that share. Refunding the list price gave a customer who used a 20% code
+    back more than they paid; leaving the VAT out under-refunded every return
+    of a VAT-able item. The total is capped at what was captured by
+    _refund_across_payments.
+    """
+    from apps.core.money import quantize_money
+
+    lines = list(order.items.all())
+    allocated = _lines_carry_allocation(order, lines)
+    if not allocated:
+        from apps.checkout.services import tax_rate_for_product
+
+        subtotal = order.subtotal.amount
+        discount = order.coupon_discount.amount + order.promotion_discount.amount
+        kept = (1 - min(max(discount / subtotal, 0), 1)) if subtotal > 0 else 1
+
+    total = Money(0, order.currency)
+    for item in return_request.items.select_related("order_item__product"):
+        line = item.order_item
+        if allocated:
+            paid = line.line_total - line.discount_amount + line.tax_amount
+            total += quantize_money(paid * item.quantity / line.quantity)
+        else:
+            # An order placed before checkout recorded each line's discount and
+            # VAT: VAT was then charged on the undiscounted line, so that is
+            # what was paid on it.
+            price = line.unit_price * item.quantity
+            rate = tax_rate_for_product(line.product) if line.product_id else 0
+            total += quantize_money(price * kept) + quantize_money(price * rate)
+    return total
+
+
+def _lines_carry_allocation(order: Order, lines) -> bool:
+    """
+    Whether checkout recorded this order's per-line discount and VAT.
+
+    The line columns existed before they were filled, so an older order has
+    zeros there; it is recognised by its lines not adding up to its totals.
+    """
+    discount = sum((line.discount_amount.amount for line in lines), 0)
+    tax = sum((line.tax_amount.amount for line in lines), 0)
+    return (
+        discount == order.coupon_discount.amount + order.promotion_discount.amount
+        and tax == order.tax_total.amount
+    )
+
+
+def _refund_across_payments(order: Order, payments, amount: Money, *, reason: str, destination) -> Money:
+    """
+    Refund `amount` from the money the order actually holds; returns what was refunded.
+
+    Refunding the newest payment alone broke every COD order with a deposit:
+    the newest is the 100 EGP deposit, the refund exceeded it, and the whole
+    return rolled back. The order's own payment goes first, then the deposit,
+    each up to what it still holds, and the total is capped at what was
+    captured. A return on an order holding no money is refused, as before.
+    """
+    from apps.payments import state as payment_state
+    from apps.payments.models import RefundStatus
+    from apps.payments.services import create_refund, is_deposit
+
+    refundable = [p for p in payments if p.status in payment_state.REFUNDABLE]
+    if not refundable:
+        raise ApplicationError(
+            ErrorCodes.PAYMENT_INVALID_STATE,
+            "This order holds no captured payment to refund.",
+        )
+    refundable.sort(key=lambda p: (is_deposit(p), -p.created_at.timestamp()))
+
+    remaining = amount
+    for payment in refundable:
+        if remaining.amount <= 0:
+            break
+        given = sum(
+            (r.amount for r in payment.refunds.filter(status__in=[RefundStatus.PROCESSED, RefundStatus.PENDING])),
+            start=Money(0, payment.amount.currency),
+        )
+        part = min(payment.amount - given, remaining)
+        if part.amount <= 0:
+            continue
+        create_refund(payment=payment, amount=part, reason=reason, destination=destination)
+        remaining -= part
+    return amount - remaining
+

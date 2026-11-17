@@ -171,19 +171,23 @@ class PasswordResetRequestView(APIView):
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = User.objects.filter(email=serializer.validated_data["email"].lower()).first()
-        if user:
-            token = services.issue_password_reset_token(user)
-            # The host comes from FRONTEND_URL, never from the request body.
-            # Honouring a caller-supplied URL here would let anyone have us
-            # mail a real reset token to a victim, pointed at their server.
-            reset_url = frontend_url("/reset-password", token=token)
-            send_email_task.delay(
-                to=user.email, subject=_("Reset your password"), template_name="reset_password",
-                context={"reset_url": reset_url}, event="password_reset", user_id=user.id,
-            )
-        # Always return success — never leak which emails are registered.
-        return success_response(message="If that email exists, a reset link has been sent.")
+        user = User.objects.filter(email__iexact=serializer.validated_data["email"].strip()).first()
+        # Said plainly when there is no such account: a customer who typed the
+        # wrong address otherwise waits for an email that never comes. Hiding it
+        # protected nothing — registration already answers "is this email or
+        # phone taken" — and the "auth" throttle still caps guessing.
+        if not user:
+            raise ApplicationError(ErrorCodes.AUTH_EMAIL_NOT_FOUND, "No account uses this email.")
+        token = services.issue_password_reset_token(user)
+        # The host comes from FRONTEND_URL, never from the request body.
+        # Honouring a caller-supplied URL here would let anyone have us
+        # mail a real reset token to a victim, pointed at their server.
+        reset_url = frontend_url("/reset-password", token=token)
+        send_email_task.delay(
+            to=user.email, subject=_("Reset your password"), template_name="reset_password",
+            context={"reset_url": reset_url}, event="password_reset", user_id=user.id,
+        )
+        return success_response(message="A reset link has been sent.")
 
 
 @extend_schema(

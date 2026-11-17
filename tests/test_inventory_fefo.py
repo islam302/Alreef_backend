@@ -190,3 +190,35 @@ def test_expired_cart_reservation_is_released_once_and_marked_expired(product_wi
         movement_type=InventoryMovementType.RELEASE,
         reference="00000000-0000-0000-0000-000000000001",
     ).count() == 1
+
+
+def test_available_stock_leaves_out_batches_that_can_no_longer_be_sold(product_with_variant_and_stock):
+    """An expired (but still active) batch is not stock a customer can buy: the
+    product must not show as in stock while checkout refuses it."""
+    from apps.inventory.models import InventoryItem
+
+    variant = product_with_variant_and_stock["variant"]
+    item = product_with_variant_and_stock["item"]
+    item.batches.all().delete()
+
+    today = timezone.localdate()
+    _make_batch(item, batch_number="GONE", quantity=7, expiration_date=today - datetime.timedelta(days=1))
+    _make_batch(item, batch_number="TODAY", quantity=4, expiration_date=today)  # not sold on its expiry date
+    good = _make_batch(item, batch_number="GOOD", quantity=3, expiration_date=today + datetime.timedelta(days=30))
+
+    reserve_stock(variant=variant, quantity=1)
+    item.refresh_from_db()
+    annotated = InventoryItem.objects.with_stock().get(pk=item.pk)
+    # The property and the SQL figure the lists use agree, and both count only the sellable batch.
+    assert item.available_quantity == annotated.available_quantity == 2
+    assert item.quantity_on_hand == 14  # what is physically held is unchanged
+
+    # A hold on a batch that has since expired is not taken off the sellable stock twice.
+    good.expiration_date = today
+    good.save(update_fields=["expiration_date"])
+    assert item.available_quantity == InventoryItem.objects.with_stock().get(pk=item.pk).available_quantity == 0
+    assert item.is_out_of_stock
+
+    with pytest.raises(ApplicationError) as exc:
+        reserve_stock(variant=variant, quantity=1)
+    assert exc.value.code == ErrorCodes.INSUFFICIENT_STOCK

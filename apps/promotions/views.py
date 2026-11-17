@@ -9,6 +9,7 @@ from apps.promotions.serializers import PromotionSerializer
 
 @extend_schema(tags=["Promotions"])
 class ActivePromotionListView(ListAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     serializer_class = PromotionSerializer
     permission_classes = [permissions.AllowAny]
     pagination_class = None

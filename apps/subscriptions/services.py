@@ -87,7 +87,7 @@ def generate_order_for_subscription(subscription: Subscription) -> SubscriptionS
             reserve_stock(variant=item.variant, quantity=item.quantity, order=order)
             OrderItem.objects.create(
                 order=order, variant=item.variant, product=item.variant.product,
-                product_name_snapshot=item.variant.product.name_en, variant_name_snapshot=item.variant.name_suffix,
+                product_name_snapshot=item.variant.product.name_ar or item.variant.product.name_en, variant_name_snapshot=item.variant.name_suffix,
                 sku_snapshot=item.variant.sku, unit_price=unit_price, quantity=item.quantity, line_total=line_total,
             )
 

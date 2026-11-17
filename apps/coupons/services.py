@@ -2,6 +2,7 @@ from django.utils import timezone
 from djmoney.money import Money
 
 from apps.core.error_codes import ApplicationError, ErrorCodes
+from apps.core.money import quantize_money
 from apps.coupons.models import Coupon, CouponDiscountType, CouponUsage
 
 
@@ -44,12 +45,22 @@ def _check_per_user_limit(coupon: Coupon, user, phone: str = ""):
     """
     if coupon.per_user_limit is None:
         return
+    from django.db.models import Q
+
+    from apps.orders.guest import normalize_phone
+
+    # A signed-in customer is counted by their account AND by the phone the
+    # order goes to (and the account's own phone). Counting the account alone
+    # let a use spent as a guest be spent again after signing in.
+    phones = {normalize_phone(p) or str(p) for p in (phone, getattr(user, "phone", None) if user else None) if p}
+    match = Q()
     if user:
-        used = CouponUsage.objects.filter(coupon=coupon, user=user).count()
-    elif phone:
-        used = CouponUsage.objects.filter(coupon=coupon, order__customer_phone=phone).count()
-    else:
+        match |= Q(user=user)
+    for number in phones:
+        match |= Q(order__customer_phone=number)
+    if not match:
         return
+    used = CouponUsage.objects.filter(match, coupon=coupon).count()
     if used >= coupon.per_user_limit:
         raise ApplicationError(ErrorCodes.COUPON_USAGE_LIMIT_REACHED, "You have already used this coupon the maximum number of times.")
 
@@ -111,7 +122,8 @@ def compute_discount(*, coupon: Coupon, items, subtotal: Money) -> Money:
     if coupon.maximum_discount_amount and discount > coupon.maximum_discount_amount:
         discount = coupon.maximum_discount_amount
 
-    return discount
+    # A percentage of a total carries four places; charge and show two.
+    return quantize_money(discount)
 
 
 def record_usage(*, coupon: Coupon, user, order, discount_amount: Money):

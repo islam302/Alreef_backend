@@ -200,7 +200,25 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "status", "resolution_note", "created_at"]
 
 
+class ReturnItemInputSerializer(serializers.Serializer):
+    """
+    One line of a return. Typed, because a bare DictField let "abc", -1 or a
+    missing id through to the service, which 500ed on them and accepted 0.
+    Whether the quantity fits the order line is checked against the order in
+    the service.
+    """
+
+    order_item_id = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1)
+
+
 class ReturnRequestCreateSerializer(serializers.Serializer):
     reason = serializers.CharField()
     description = serializers.CharField(required=False, allow_blank=True, default="")
-    items = serializers.ListField(child=serializers.DictField(), allow_empty=False, help_text='[{"order_item_id": 1, "quantity": 1}]')
+    items = ReturnItemInputSerializer(many=True, allow_empty=False, help_text='[{"order_item_id": 1, "quantity": 1}]')
+
+    def validate_items(self, items):
+        ids = [entry["order_item_id"] for entry in items]
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError("Each order item may appear only once.")
+        return items

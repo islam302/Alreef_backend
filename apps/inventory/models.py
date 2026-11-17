@@ -2,9 +2,33 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, Greatest
+from django.utils import timezone
 from djmoney.models.fields import MoneyField
 
 from apps.core.models import BaseModel
+
+
+def sellable_batch_q(prefix: str = "") -> Q:
+    """
+    The one rule for when a dated batch stops being sold: on its expiration
+    date. consume_reservation, reserve_stock, the expiry sweep and the
+    available-stock figure all use it; they used to disagree about the last day.
+
+    `prefix` reaches the batch through a relation ("batch__" from a reservation).
+    """
+    return Q(**{f"{prefix}expiration_date__isnull": True}) | Q(**{f"{prefix}expiration_date__gt": timezone.localdate()})
+
+
+def _sellable_reservation_q(prefix: str = "") -> Q:
+    """
+    Active holds that take units out of *sellable* stock: those on a batch that
+    is still on sale, plus backorder holds that have no batch. A hold on a batch
+    that has since expired is not subtracted again — its batch is already left
+    out of the sellable figure.
+    """
+    return Q(**{f"{prefix}batch__isnull": True}) | (
+        Q(**{f"{prefix}batch__is_active": True}) & sellable_batch_q(f"{prefix}batch__")
+    )
 
 
 class InventoryItemQuerySet(models.QuerySet):
@@ -46,13 +70,32 @@ class InventoryItemQuerySet(models.QuerySet):
             .annotate(total=Sum("quantity"))
             .values("total")[:1]
         )
+        # What can still be sold: an expired batch is physically on the shelf
+        # (and stays in `on_hand_total`) but reserve_stock will not take from
+        # it, so counting it showed a product "in stock" that checkout refused.
+        sellable_on_hand = (
+            Batch.objects.filter(item=OuterRef("pk"), is_active=True)
+            .filter(sellable_batch_q())
+            .values("item")
+            .annotate(total=Sum("quantity"))
+            .values("total")[:1]
+        )
+        sellable_reserved = (
+            StockReservation.objects.filter(item=OuterRef("pk"), status=StockReservationStatus.ACTIVE)
+            .filter(_sellable_reservation_q())
+            .values("item")
+            .annotate(total=Sum("quantity"))
+            .values("total")[:1]
+        )
         return self.annotate(
             on_hand_total=Coalesce(Subquery(on_hand, output_field=models.IntegerField()), Value(0)),
             reserved_total=Coalesce(Subquery(reserved, output_field=models.IntegerField()), Value(0)),
+            sellable_on_hand_total=Coalesce(Subquery(sellable_on_hand, output_field=models.IntegerField()), Value(0)),
+            sellable_reserved_total=Coalesce(Subquery(sellable_reserved, output_field=models.IntegerField()), Value(0)),
         ).annotate(
             # Mirrors `available_quantity`: a negative figure is not meaningful
             # to show, and clamping in SQL keeps the filters below honest.
-            available_total=Greatest(F("on_hand_total") - F("reserved_total"), Value(0)),
+            available_total=Greatest(F("sellable_on_hand_total") - F("sellable_reserved_total"), Value(0)),
         )
 
     # The three states the dashboard filters by, as SQL rather than a Python
@@ -121,10 +164,22 @@ class InventoryItem(BaseModel):
 
     @property
     def available_quantity(self) -> int:
+        """
+        What can still be sold: active, unexpired batches less the holds on
+        them (sellable_batch_q — the rule reserve_stock takes stock by).
+        """
         annotated = getattr(self, "available_total", None)
         if annotated is not None:
             return annotated
-        return max(self.quantity_on_hand - self.reserved_quantity, 0)
+        on_hand = (
+            self.batches.filter(is_active=True).filter(sellable_batch_q())
+            .aggregate(total=models.Sum("quantity"))["total"] or 0
+        )
+        held = (
+            self.reservations.filter(status=StockReservationStatus.ACTIVE).filter(_sellable_reservation_q())
+            .aggregate(total=models.Sum("quantity"))["total"] or 0
+        )
+        return max(on_hand - held, 0)
 
     @property
     def is_low_stock(self) -> bool:

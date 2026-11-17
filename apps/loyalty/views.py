@@ -3,6 +3,7 @@ from rest_framework import permissions
 from rest_framework.generics import ListAPIView
 from rest_framework.views import APIView
 
+from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
 from apps.core.schema import envelope
 from apps.loyalty import services
@@ -49,5 +50,10 @@ class LoyaltyRedeemView(APIView):
     def post(self, request):
         serializer = LoyaltyRedeemSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        discount_value = services.redeem_points(user=request.user, points=serializer.validated_data["points"])
-        return success_response({"discount_value": str(discount_value.amount), "currency": str(discount_value.currency)})
+        # Refused until checkout can apply the discount. This took the points
+        # off the balance and handed back a number nothing would ever accept,
+        # so every redemption simply lost the customer their points.
+        raise ApplicationError(
+            ErrorCodes.LOYALTY_REDEMPTION_UNAVAILABLE,
+            "Redeeming points is not available yet. Your points are safe.",
+        )

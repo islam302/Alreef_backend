@@ -208,7 +208,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.ScopedRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
-        "rest_framework.throttling.AnonRateThrottle",
+        # The anonymous baseline, minus public reads that the "catalog" scope
+        # budgets on its own (apps.core.throttling).
+        "apps.core.throttling.BrowsingAwareAnonRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
         # Baseline safety net applied to EVERY endpoint regardless of whether
@@ -216,6 +218,10 @@ REST_FRAMEWORK = {
         # without a scope, so anon/user rates ensure nothing is ever fully
         # unthrottled.
         "anon": "60/min",
+        # Public read-only catalog/content/payment-methods/shipping-quote GETs.
+        # A page load is ~12 calls and carriers share one IP among many
+        # customers, so this is per IP and generous; writes are not in it.
+        "catalog": "600/min",
         "user": "300/min",
         "auth": "20/min",
         # Tighter scope for token/OTP *confirmation* endpoints, where the

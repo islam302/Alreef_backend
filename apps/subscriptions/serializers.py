@@ -50,7 +50,7 @@ class SubscriptionItemInputSerializer(serializers.Serializer):
 class SubscriptionCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=150)
     address_id = serializers.IntegerField()
-    shipping_method_id = serializers.IntegerField()
+    shipping_method_id = serializers.IntegerField(min_value=1)
     payment_method = serializers.CharField()
     frequency = serializers.ChoiceField(choices=["weekly", "monthly", "quarterly", "custom"])
     custom_interval_days = serializers.IntegerField(

@@ -160,6 +160,8 @@ def test_a_rolled_back_confirmation_sends_no_email(
     response = _checkout(authenticated_client, product_with_variant_and_stock["variant"], address, shipping_setup, method="instapay")
     order = Order.objects.get(order_number=response.json()["data"]["order"]["order_number"])
 
+    # The transfer arrived: confirming an unpaid one is refused (ORDER_PAYMENT_NOT_SETTLED).
+    order.payments.update(status="captured")
     with mock.patch(SEND) as send, django_capture_on_commit_callbacks(execute=True):
         with pytest.raises(RuntimeError):
             with transaction.atomic():
@@ -297,6 +299,8 @@ def test_staff_confirming_a_transfer_order_by_hand_sends_the_confirmation(
     response = _checkout(authenticated_client, product_with_variant_and_stock["variant"], address, shipping_setup, method="instapay")
     order = Order.objects.get(order_number=response.json()["data"]["order"]["order_number"])
 
+    # The transfer arrived: confirming an unpaid one is refused (ORDER_PAYMENT_NOT_SETTLED).
+    order.payments.update(status="captured")
     with mock.patch(SEND) as send, django_capture_on_commit_callbacks(execute=True):
         transition_status(order, OrderStatus.CONFIRMED)
 

@@ -22,6 +22,7 @@ class ErrorCodes:
     AUTH_TOKEN_INVALID = "AUTH_TOKEN_INVALID"
     AUTH_ACCOUNT_DISABLED = "AUTH_ACCOUNT_DISABLED"
     AUTH_EMAIL_NOT_VERIFIED = "AUTH_EMAIL_NOT_VERIFIED"
+    AUTH_EMAIL_NOT_FOUND = "AUTH_EMAIL_NOT_FOUND"
     AUTH_EMAIL_ALREADY_EXISTS = "AUTH_EMAIL_ALREADY_EXISTS"
     AUTH_PHONE_ALREADY_EXISTS = "AUTH_PHONE_ALREADY_EXISTS"
     AUTH_OTP_INVALID = "AUTH_OTP_INVALID"
@@ -73,6 +74,12 @@ class ErrorCodes:
     ORDER_PAYMENT_IN_PROGRESS = "ORDER_PAYMENT_IN_PROGRESS"
     ORDER_ALREADY_PAID = "ORDER_ALREADY_PAID"
     ORDER_INVALID_TRANSITION = "ORDER_INVALID_TRANSITION"
+    # Staff confirming an order whose transfer, deposit or card payment has not
+    # arrived. Settling the payment confirms the order instead.
+    ORDER_PAYMENT_NOT_SETTLED = "ORDER_PAYMENT_NOT_SETTLED"
+    # A status that has its own endpoint (cancel, returns, refunds) was asked
+    # for through the plain status change, which would skip that flow's work.
+    ORDER_STATUS_HAS_OWN_FLOW = "ORDER_STATUS_HAS_OWN_FLOW"
 
     # Payments
     PAYMENT_FAILED = "PAYMENT_FAILED"
@@ -94,6 +101,8 @@ class ErrorCodes:
     GIFT_CARD_EXPIRED = "GIFT_CARD_EXPIRED"
     GIFT_CARD_INSUFFICIENT_BALANCE = "GIFT_CARD_INSUFFICIENT_BALANCE"
     LOYALTY_INSUFFICIENT_POINTS = "LOYALTY_INSUFFICIENT_POINTS"
+    # Points cannot be spent yet: checkout has no step that applies them.
+    LOYALTY_REDEMPTION_UNAVAILABLE = "LOYALTY_REDEMPTION_UNAVAILABLE"
 
     # Reviews
     REVIEW_NOT_ELIGIBLE = "REVIEW_NOT_ELIGIBLE"
@@ -118,6 +127,7 @@ ERROR_STATUS_MAP = {
     ErrorCodes.AUTH_TOKEN_INVALID: 401,
     ErrorCodes.AUTH_ACCOUNT_DISABLED: 403,
     ErrorCodes.AUTH_EMAIL_NOT_VERIFIED: 403,
+    ErrorCodes.AUTH_EMAIL_NOT_FOUND: 404,
     ErrorCodes.AUTH_EMAIL_ALREADY_EXISTS: 409,
     ErrorCodes.AUTH_PHONE_ALREADY_EXISTS: 409,
     ErrorCodes.AUTH_OTP_INVALID: 400,
@@ -160,6 +170,8 @@ ERROR_STATUS_MAP = {
     ErrorCodes.ORDER_PAYMENT_IN_PROGRESS: 409,
     ErrorCodes.ORDER_ALREADY_PAID: 409,
     ErrorCodes.ORDER_INVALID_TRANSITION: 409,
+    ErrorCodes.ORDER_PAYMENT_NOT_SETTLED: 409,
+    ErrorCodes.ORDER_STATUS_HAS_OWN_FLOW: 409,
     ErrorCodes.PAYMENT_FAILED: 402,
     ErrorCodes.PAYMENT_EXPIRED: 410,
     ErrorCodes.PAYMENT_AMOUNT_MISMATCH: 409,
@@ -177,6 +189,7 @@ ERROR_STATUS_MAP = {
     ErrorCodes.GIFT_CARD_EXPIRED: 400,
     ErrorCodes.GIFT_CARD_INSUFFICIENT_BALANCE: 409,
     ErrorCodes.LOYALTY_INSUFFICIENT_POINTS: 409,
+    ErrorCodes.LOYALTY_REDEMPTION_UNAVAILABLE: 409,
     ErrorCodes.REVIEW_NOT_ELIGIBLE: 403,
     ErrorCodes.REVIEW_ALREADY_EXISTS: 409,
     # The assistant is a third-party service. Neither is the customer's fault:

@@ -15,6 +15,7 @@ from apps.core.schema import envelope
 
 @extend_schema(tags=["Cart"], responses=CartSerializer)
 class CartDetailView(APIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):

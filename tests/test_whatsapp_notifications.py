@@ -396,6 +396,8 @@ def test_a_transfer_order_is_told_where_to_pay_then_confirmed(
     ]
     assert order.status == OrderStatus.PENDING
 
+    # The transfer arrived: confirming an unpaid one is refused (ORDER_PAYMENT_NOT_SETTLED).
+    order.payments.update(status="captured")
     with mock.patch(DELAY) as delay, django_capture_on_commit_callbacks(execute=True):
         transition_status(order, OrderStatus.CONFIRMED)
     assert [s["template_name"] for s in _sent(delay)] == ["elreef_order_confirmed"]
@@ -443,6 +445,8 @@ def test_a_rolled_back_order_sends_nothing(
     whatsapp_on.PAYMENT_PROVIDERS = payment_providers_with(INSTAPAY=INSTAPAY_TEST_CONFIG)
     order = _checkout(authenticated_client, product_with_variant_and_stock["variant"], address, shipping_setup, method="instapay")
 
+    # The transfer arrived: confirming an unpaid one is refused (ORDER_PAYMENT_NOT_SETTLED).
+    order.payments.update(status="captured")
     with mock.patch(DELAY) as delay, django_capture_on_commit_callbacks(execute=True):
         with pytest.raises(RuntimeError):
             with transaction.atomic():

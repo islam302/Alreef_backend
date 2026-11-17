@@ -2,6 +2,7 @@ from django.db.models import Q
 from django.utils import timezone
 from djmoney.money import Money
 
+from apps.core.money import quantize_money
 from apps.promotions.models import Promotion, PromotionType
 
 
@@ -15,14 +16,29 @@ def get_active_promotions():
     )
 
 
+def _scope_ids(promotion: Promotion):
+    """
+    The promotion's product/category/brand ids, read from the prefetched sets.
+
+    `.filter().exists()` and `is_scoped` ignore a prefetch, so every promotion
+    cost up to six queries per cart line, on every cart and checkout request.
+    """
+    cached = getattr(promotion, "_scope_ids_cache", None)
+    if cached is None:
+        cached = (
+            {p.pk for p in promotion.products.all()},
+            {c.pk for c in promotion.categories.all()},
+            {b.pk for b in promotion.brands.all()},
+        )
+        promotion._scope_ids_cache = cached
+    return cached
+
+
 def _matches_scope(promotion: Promotion, product) -> bool:
-    if not promotion.is_scoped:
+    product_ids, category_ids, brand_ids = _scope_ids(promotion)
+    if not (product_ids or category_ids or brand_ids):
         return True
-    return (
-        promotion.products.filter(pk=product.pk).exists()
-        or promotion.categories.filter(pk=product.category_id).exists()
-        or promotion.brands.filter(pk=product.brand_id).exists()
-    )
+    return product.pk in product_ids or product.category_id in category_ids or product.brand_id in brand_ids
 
 
 def compute_promotions_for_items(items, currency: str = "EGP"):
@@ -46,7 +62,9 @@ def compute_promotions_for_items(items, currency: str = "EGP"):
         if not matching_items:
             continue
 
-        discount = _discount_for_promotion(promotion, matching_items, currency)
+        # Rounded per promotion, so the amounts listed as applied add up to the
+        # discount charged.
+        discount = quantize_money(_discount_for_promotion(promotion, matching_items, currency))
         if promotion.promotion_type == PromotionType.FREE_SHIPPING:
             free_shipping = True
 

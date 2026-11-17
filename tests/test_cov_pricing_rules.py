@@ -193,13 +193,14 @@ def test_idempotency_key_reused_with_a_different_body(authenticated_client, prod
     assert changed.status_code == 409
 
 
-def test_idempotency_request_in_flight(authenticated_client, address, shipping_setup):
+def test_idempotency_request_in_flight(authenticated_client, user, address, shipping_setup):
     from apps.core.idempotency import _LOCK_SENTINEL, _body_fingerprint, _cache_key
 
     key = str(uuid.uuid4())
     body = {"address_id": address.id, "shipping_method_id": shipping_setup["method"].id, "payment_method": "cod"}
     fingerprint = _body_fingerprint(SimpleNamespace(data=body))
     scope = "checkout"
-    cache.set(_cache_key(scope, key), {"fingerprint": fingerprint, "status": _LOCK_SENTINEL}, 60)
+    # Keys are scoped to whoever sent them (apps.core.idempotency._principal).
+    cache.set(_cache_key(scope, key, f"user:{user.pk}"), {"fingerprint": fingerprint, "status": _LOCK_SENTINEL}, 60)
     response = authenticated_client.post("/api/v1/checkout/", body, format="json", HTTP_IDEMPOTENCY_KEY=key)
     assert response.status_code == 409

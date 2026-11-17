@@ -9,6 +9,7 @@ from apps.core.response import success_response
 
 @extend_schema(tags=["Products"])
 class AttributeListView(ListAPIView):
+    throttle_scope = "catalog"  # public read: apps.core.throttling
     queryset = Attribute.objects.filter(is_filterable=True).prefetch_related("values")
     serializer_class = AttributeSerializer
     permission_classes = [permissions.AllowAny]

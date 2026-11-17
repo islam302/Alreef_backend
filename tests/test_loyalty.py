@@ -115,11 +115,13 @@ def test_loyalty_account_endpoint_creates_account_on_first_access(authenticated_
     assert LoyaltyAccount.objects.filter(user=user).exists()
 
 
-def test_loyalty_redeem_endpoint_success(authenticated_client, user):
+def test_loyalty_redeem_endpoint_refuses_and_keeps_the_points(authenticated_client, user):
+    """Checkout cannot apply a redemption yet, so redeeming only lost the points."""
     _configure_settings(minimum_redeemable_points=100, redemption_value_per_point="0.10")
     LoyaltyAccount.objects.create(user=user, points_balance=200, lifetime_points_earned=200)
 
     response = authenticated_client.post(LOYALTY_REDEEM_URL, {"points": 150}, format="json")
 
-    assert response.status_code == 200
-    assert response.json()["data"]["discount_value"] == "15.00"
+    assert response.status_code == 409
+    assert response.json()["errors"]["code"] == "LOYALTY_REDEMPTION_UNAVAILABLE"
+    assert LoyaltyAccount.objects.get(user=user).points_balance == 200

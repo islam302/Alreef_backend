@@ -1,6 +1,8 @@
 import logging
+import math
 from dataclasses import dataclass, field
 from decimal import Decimal
+from fractions import Fraction
 
 from django.conf import settings
 from django.db import transaction
@@ -9,6 +11,7 @@ from djmoney.money import Money
 from apps.carts.models import CartStatus
 from apps.catalog.models import TaxCategory
 from apps.core.error_codes import ApplicationError, ErrorCodes
+from apps.core.money import quantize_money
 from apps.orders.models import Order, OrderItem, OrderStatus, PaymentMethodSnapshot
 from apps.shipping.services import get_quote_for_method
 
@@ -36,12 +39,70 @@ class CheckoutTotals:
     #: the courier then collects. Both None otherwise.
     deposit: Money | None = None
     due_on_delivery: Money | None = None
+    #: cart item pk -> (its share of the order's discounts, the VAT charged on
+    #: what is left). Stored on the OrderItem, so a return refunds what that
+    #: line was actually paid.
+    lines: dict = field(default_factory=dict)
 
 
 def tax_rate_for_product(product) -> Decimal:
     if product.tax_category == TaxCategory.STANDARD:
         return settings.EGYPT_VAT_RATE
     return Decimal("0")
+
+
+def _zero(currency) -> Money:
+    """A zero amount in the shape every other amount has ("0.00", not "0")."""
+    return Money(Decimal("0.00"), currency)
+
+
+def _cents(money: Money) -> int:
+    return int((Decimal(money.amount) * 100).to_integral_value())
+
+
+def _allocate_discounts(items, parts, currency) -> dict:
+    """
+    Spread the order's discounts over its lines; returns {item.pk: Money}.
+
+    `parts` is [(amount, eligible items)]: each discount is shared over the
+    lines it applies to (a scoped coupon or promotion only over its own
+    products), in proportion to their line totals. A line never takes more than
+    its own total; what would overflow it goes to the other lines. The exact
+    shares are then rounded to piastres cumulatively, which keeps every share
+    whole and non-negative and leaves the rounding remainder on the last line,
+    so the parts add up to the order's discount to the piastre.
+    """
+    # Exact fractions, not Decimal: two discounts' shares of a line must add up
+    # to the same figure as one discount of their sum, or a share sitting on a
+    # half piastre could round either way.
+    capacity = {item.pk: Fraction(_cents(item.line_total)) for item in items}
+    target = {item.pk: Fraction(0) for item in items}
+
+    for amount, eligible in parts:
+        remaining = Fraction(_cents(amount))
+        pool = [item.pk for item in eligible]
+        while remaining > 0:
+            pool = [pk for pk in pool if capacity[pk] > target[pk]]
+            if not pool:
+                # The eligible lines are full; the rest goes on the others.
+                pool = [pk for pk in capacity if capacity[pk] > target[pk]]
+                if not pool:
+                    break
+            weight = sum(capacity[pk] for pk in pool)
+            given = Fraction(0)
+            for pk in pool:
+                share = min(remaining * capacity[pk] / weight, capacity[pk] - target[pk])
+                target[pk] += share
+                given += share
+            remaining -= given
+
+    allocation, running, rounded_before = {}, Fraction(0), 0
+    for item in items:
+        running += target[item.pk]
+        rounded = math.floor(running + Fraction(1, 2))  # half up, in piastres
+        allocation[item.pk] = quantize_money(Money(Decimal(rounded - rounded_before) / 100, currency))
+        rounded_before = rounded
+    return allocation
 
 
 def _refresh_cart_lines(items):
@@ -83,13 +144,15 @@ def calculate_totals(
     _refresh_cart_lines(items)
 
     currency = cart.currency
-    subtotal = sum((i.line_total for i in items), start=Money(0, currency))
+    subtotal = quantize_money(sum((i.line_total for i in items), start=_zero(currency)))
 
-    from apps.promotions.services import compute_promotions_for_items
+    from apps.promotions.services import _matches_scope, compute_promotions_for_items
 
     promotion_discount, applied_promotions, promo_free_shipping = compute_promotions_for_items(items, currency)
+    promotion_discount = quantize_money(promotion_discount)
 
-    coupon_discount = Money(0, currency)
+    coupon = None
+    coupon_discount = _zero(currency)
     if coupon_code:
         from apps.coupons.services import compute_discount, validate_coupon_for_cart
 
@@ -98,25 +161,59 @@ def calculate_totals(
         # and the coupon's scope have to be enforced here too — otherwise the
         # cart's coupon endpoint is the only place they apply, and checkout
         # never asks it.
-        coupon = validate_coupon_for_cart(code=coupon_code, cart=cart, user=user, phone="" if user else phone)
-        coupon_discount = compute_discount(coupon=coupon, items=items, subtotal=subtotal)
+        # The phone goes in for a signed-in customer too: "one per customer"
+        # counts the orders placed with this phone, so a use spent as a guest is
+        # not given back by signing in.
+        coupon = validate_coupon_for_cart(code=coupon_code, cart=cart, user=user, phone=phone)
+        coupon_discount = quantize_money(compute_discount(coupon=coupon, items=items, subtotal=subtotal))
         if coupon.discount_type == "free_shipping":
             promo_free_shipping = True
 
+    # The discounts are capped at what the cart is worth: promotions first,
+    # the coupon takes what is left. Only the payable figure used to be
+    # floored, so an order stored more discount than it gave and its parts no
+    # longer added up to its total.
+    if promotion_discount > subtotal:
+        promotion_discount = subtotal
+    if coupon_discount > subtotal - promotion_discount:
+        coupon_discount = subtotal - promotion_discount
     discounted_subtotal = subtotal - coupon_discount - promotion_discount
-    if discounted_subtotal.amount < 0:
-        discounted_subtotal = Money(0, currency)
 
-    tax_total = Money(0, currency)
+    # Which lines each discount comes off, so VAT is charged on what the
+    # customer actually pays for each line (Egyptian VAT is due on the
+    # consideration received, after discounts).
+    parts = []
+    promo_left = promotion_discount
+    for entry in applied_promotions:
+        share = min(quantize_money(entry["discount"]), promo_left)
+        promo_left -= share
+        if share.amount > 0:
+            parts.append((share, [i for i in items if _matches_scope(entry["promotion"], i.variant.product)]))
+    if promo_left.amount > 0:
+        parts.append((promo_left, items))
+    if coupon_discount.amount > 0:
+        from apps.coupons.services import _applicable_items
+
+        parts.append((coupon_discount, _applicable_items(coupon, items) or items))
+    line_discounts = _allocate_discounts(items, parts, currency)
+
+    tax_total = _zero(currency)
+    lines = {}
     for item in items:
         rate = tax_rate_for_product(item.variant.product)
-        if rate > 0:
-            tax_total += item.line_total * rate
+        line_discount = line_discounts[item.pk]
+        line_tax = quantize_money((item.line_total - line_discount) * rate) if rate > 0 else _zero(currency)
+        tax_total += line_tax
+        lines[item.pk] = (line_discount, line_tax)
+    tax_total = quantize_money(tax_total)
 
-    shipping_total = Money(0, currency)
-    if shipping_method_id:
+    shipping_total = _zero(currency)
+    # `is not None`, not truthiness: id 0 used to skip the quote entirely and
+    # ship for free (and skip the COD delivery-option check below). The
+    # serializers require >= 1; this keeps a 0 from any other caller priced.
+    if shipping_method_id is not None:
         quote = get_quote_for_method(governorate=address.governorate, method_id=shipping_method_id, subtotal=subtotal)
-        shipping_total = Money(0, currency) if promo_free_shipping else quote.price
+        shipping_total = _zero(currency) if promo_free_shipping else quantize_money(quote.price)
 
     # Every method is checked for availability, not just COD: a method whose
     # gateway is switched off or half-configured must fail here, while the
@@ -135,10 +232,10 @@ def calculate_totals(
             f"{label} is not available at the moment. Please choose another payment method.",
         )
 
-    cod_fee = Money(0, currency)
+    cod_fee = _zero(currency)
     if payment_method == PaymentMethodSnapshot.COD:
         fee, minimum, maximum = payment_config.cod_limits()
-        cod_fee = Money(fee, currency)
+        cod_fee = quantize_money(Money(fee, currency))
 
         # Checked against the order's own value, before the COD fee is added —
         # a minimum that the fee itself satisfies would be no minimum at all.
@@ -155,25 +252,25 @@ def calculate_totals(
             )
 
         allowed_shipping = payment_config.cod_allowed_shipping_method_ids()
-        if allowed_shipping is not None and shipping_method_id and int(shipping_method_id) not in allowed_shipping:
+        if allowed_shipping is not None and shipping_method_id is not None and int(shipping_method_id) not in allowed_shipping:
             raise ApplicationError(
                 ErrorCodes.PAYMENT_METHOD_NOT_AVAILABLE,
                 "The selected delivery option cannot be paid for on delivery.",
             )
 
-    grand_total = discounted_subtotal + tax_total + shipping_total + cod_fee
+    grand_total = quantize_money(discounted_subtotal + tax_total + shipping_total + cod_fee)
 
     deposit = due_on_delivery = None
     if payment_method == PaymentMethodSnapshot.COD and payment_config.cod_deposit_required():
         # Part of the total, not on top of it: never more than the order is worth.
-        deposit = Money(min(payment_config.cod_deposit_amount(), grand_total.amount), currency)
-        due_on_delivery = grand_total - deposit
+        deposit = quantize_money(Money(min(payment_config.cod_deposit_amount(), grand_total.amount), currency))
+        due_on_delivery = quantize_money(grand_total - deposit)
 
     return CheckoutTotals(
         subtotal=subtotal, coupon_discount=coupon_discount, promotion_discount=promotion_discount,
         tax_total=tax_total, shipping_total=shipping_total, cod_fee=cod_fee, grand_total=grand_total,
         applied_promotions=applied_promotions, free_shipping=promo_free_shipping,
-        deposit=deposit, due_on_delivery=due_on_delivery,
+        deposit=deposit, due_on_delivery=due_on_delivery, lines=lines,
     )
 
 
@@ -294,8 +391,12 @@ def create_order_from_cart(
         reserve_stock(variant=item.variant, quantity=item.quantity, order=order)
         OrderItem.objects.create(
             order=order, variant=item.variant, product=item.variant.product,
-            product_name_snapshot=item.variant.product.name_en, variant_name_snapshot=item.variant.name_suffix,
+            # Arabic: the order page, tracking and invoice are read in Arabic, and
+            # the English name showed there ("Sidr Honey · 500g").
+            product_name_snapshot=item.variant.product.name_ar or item.variant.product.name_en,
+            variant_name_snapshot=item.variant.name_suffix,
             sku_snapshot=item.variant.sku, unit_price=item.unit_price_snapshot, quantity=item.quantity,
+            discount_amount=totals.lines[item.pk][0], tax_amount=totals.lines[item.pk][1],
             line_total=item.line_total,
         )
 
@@ -477,7 +578,7 @@ def confirm_order(order: Order, *, payment_received: bool = True):
     while the parcel had not left.
     """
     from apps.inventory.models import StockReservation, StockReservationStatus
-    from apps.inventory.services import consume_reservation
+    from apps.inventory.services import consume_for_confirmation
     from apps.notifications.services import queue_email
     from apps.orders.services import order_email_context, transition_status
 
@@ -488,7 +589,8 @@ def confirm_order(order: Order, *, payment_received: bool = True):
         order = transition_status(order, OrderStatus.CONFIRMED)
 
     for reservation in StockReservation.objects.filter(order=order, status=StockReservationStatus.ACTIVE):
-        consume_reservation(reservation)
+        # Never fails the confirmation over a batch that expired mid-payment.
+        consume_for_confirmation(reservation)
 
     if order.coupon_code:
         # The use is reserved at checkout. This covers orders placed before

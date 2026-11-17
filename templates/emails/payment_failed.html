@@ -1,7 +1,7 @@
 {% extends "emails/_base.html" %}
 {% block content %}
 <h2 style="margin:0 0 12px;color:#a94832;">الدفع ماكملش</h2>
-<p>محاولة دفع <strong>{{ amount }} {{ currency }}</strong> للطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong> ماتمّتش.</p>
+<p>{% if is_deposit %}دفعة التأكيد بقيمة{% else %}محاولة دفع{% endif %} <strong>{{ amount }} {% if currency == "EGP" %}ج.م{% else %}{{ currency }}{% endif %}</strong> للطلب رقم <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong> ماتمّتش.</p>
 <p>تقدر تشوف حالة الطلب من الرابط ده، ولو محتاج مساعدة كلّمنا.</p>
-<p style="margin:24px 0;"><a href="{% if order_url %}{{ order_url }}{% else %}{{ frontend_url }}/account/orders/{{ order_number }}{% endif %}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">شوف الطلب</a></p>
+{% if order_url %}<p style="margin:24px 0;"><a href="{{ order_url }}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">شوف الطلب</a></p>{% endif %}
 {% endblock %}
