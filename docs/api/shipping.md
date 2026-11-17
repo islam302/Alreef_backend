@@ -60,8 +60,8 @@ GET /api/v1/shipping/quotes/?governorate=cairo&subtotal=900.00&currency=EGP&weig
 {
   "success": true, "message": "Success",
   "data": [
-    { "method_id": 1, "method_name": "Standard", "method_type": "standard", "min_delivery_days": 2, "max_delivery_days": 4, "price": "45.00", "currency": "EGP", "is_free": false },
-    { "method_id": 2, "method_name": "Express", "method_type": "express", "min_delivery_days": 1, "max_delivery_days": 1, "price": "90.00", "currency": "EGP", "is_free": false }
+    { "method_id": 1, "method_name": "Standard", "method_name_ar": "توصيل عادي", "method_type": "standard", "min_delivery_days": 2, "max_delivery_days": 4, "price": "45.00", "currency": "EGP", "is_free": false },
+    { "method_id": 2, "method_name": "Express", "method_name_ar": "توصيل سريع", "method_type": "express", "min_delivery_days": 1, "max_delivery_days": 1, "price": "90.00", "currency": "EGP", "is_free": false }
   ],
   "errors": null
 }

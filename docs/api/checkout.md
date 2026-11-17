@@ -103,7 +103,7 @@ Success `201` (`CheckoutResultSerializer`):
       "id": 331, "order_number": "ORD-20260814-00042", "status": "confirmed", "currency": "EGP",
       "customer_name": "Sara Mostafa", "customer_email": "sara.mostafa@example.com", "customer_phone": "+201001234567",
       "shipping_address_snapshot": { "label": "home", "full_name": "Sara Mostafa", "phone": "+201001234567", "governorate": "Cairo", "city": "Nasr City", "district": "Nasr City", "street": "Makram Ebeid St.", "building": "12", "floor": "4", "apartment": "9", "landmark": "Near City Stars", "postal_code": "11371", "notes": "" },
-      "shipping_method_name": "Standard", "payment_method": "cod",
+      "shipping_method_name": "Standard", "shipping_method_name_ar": "توصيل عادي", "payment_method": "cod",
       "subtotal": "900.00", "coupon_code": "WELCOME10", "coupon_discount": "90.00", "promotion_discount": "0.00",
       "loyalty_discount": "0.00", "gift_card_amount_used": "0.00", "store_credit_amount_used": "0.00",
       "tax_total": "0.00", "shipping_total": "45.00", "cod_fee": "15.00", "grand_total": "870.00",

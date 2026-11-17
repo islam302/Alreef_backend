@@ -104,7 +104,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             "id", "order_number", "status", "currency", "customer_name", "customer_email", "customer_phone",
-            "shipping_address_snapshot", "shipping_method_name", "payment_method",
+            "shipping_address_snapshot", "shipping_method_name", "shipping_method_name_ar", "payment_method",
             "subtotal", "coupon_code", "coupon_discount", "promotion_discount", "loyalty_discount",
             "gift_card_amount_used", "store_credit_amount_used", "tax_total", "shipping_total", "cod_fee",
             "grand_total", "notes", "cancel_reason", "items", "status_history",
@@ -148,7 +148,7 @@ class GuestOrderStatusSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            "order_number", "status", "currency", "payment_method", "shipping_method_name", "destination",
+            "order_number", "status", "currency", "payment_method", "shipping_method_name", "shipping_method_name_ar", "destination",
             "subtotal", "coupon_discount", "promotion_discount", "tax_total", "shipping_total", "cod_fee",
             "grand_total", "items", "status_history", "payment",
             "confirmed_at", "shipped_at", "delivered_at", "cancelled_at", "created_at",

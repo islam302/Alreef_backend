@@ -87,6 +87,9 @@ class ShippingMethod(BaseModel):
     """Configurable shipping method (e.g. Standard, Express). Rates live in ShippingRate."""
 
     name = models.CharField(max_length=100)
+    # What the Arabic storefront shows; `name` stays the internal/English name
+    # (orders are matched to their method by it).
+    name_ar = models.CharField(max_length=100, blank=True)
     method_type = models.CharField(max_length=16, choices=ShippingMethodType.choices, default=ShippingMethodType.STANDARD)
     description = models.CharField(max_length=255, blank=True)
     carrier_code = models.CharField(max_length=32, blank=True, help_text="e.g. bosta, aramex, self")

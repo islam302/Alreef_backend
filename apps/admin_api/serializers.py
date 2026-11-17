@@ -695,7 +695,7 @@ class AdminShippingMethodSerializer(serializers.ModelSerializer):
     class Meta:
         model = ShippingMethod
         fields = [
-            "id", "name", "method_type", "description", "carrier_code",
+            "id", "name", "name_ar", "method_type", "description", "carrier_code",
             "min_delivery_days", "max_delivery_days", "is_active", "sort_order",
         ]
 

@@ -212,7 +212,7 @@ Success `200`: `"Phone verified."` Errors: `AUTH_OTP_INVALID` (400), `AUTH_OTP_E
 
 `AddressViewSet` (`ModelViewSet`), auth: `IsAuthenticated`, scoped to `request.user`. Registered via `DefaultRouter` under the un-prefixed `apps.users.urls`.
 
-Fields (`AddressSerializer`): `id, label, full_name, phone, governorate, governorate_name, city, city_name, district, street, building, floor, apartment, landmark, postal_code, notes, is_default, created_at, updated_at`. `label` is one of `home | work | other`. `governorate`/`city` are FK ids referencing `apps.shipping` (`Governorate`/`City` — see `docs/api/shipping.md`). Shipping **prices are never stored on the address**.
+Fields (`AddressSerializer`): `id, label, full_name, phone, governorate, governorate_name, governorate_name_ar, city, city_name, city_name_ar, district, street, building, floor, apartment, landmark, postal_code, notes, is_default, created_at, updated_at`. `label` is one of `home | work | other`. `governorate`/`city` are FK ids referencing `apps.shipping` (`Governorate`/`City` — see `docs/api/shipping.md`). `governorate_name`/`city_name` are the English names (kept for compatibility); `governorate_name_ar`/`city_name_ar` are the Arabic ones the storefront shows (`city_name*` are `null` when no city is set). Shipping **prices are never stored on the address**.
 
 - `GET /api/v1/addresses/` — list current user's addresses, ordered `-is_default, -created_at`. Not paginated (returns a plain array in `data`).
 - `POST /api/v1/addresses/` — create. `201`.

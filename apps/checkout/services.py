@@ -363,6 +363,7 @@ def create_order_from_cart(
             "postal_code": address.postal_code, "notes": address.notes,
         },
         shipping_method_name=shipping_method.name if shipping_method else "",
+        shipping_method_name_ar=shipping_method.name_ar if shipping_method else "",
         payment_method=payment_method,
         subtotal=totals.subtotal,
         coupon_code=coupon_code,

@@ -18,12 +18,14 @@ class CitySerializer(serializers.ModelSerializer):
 class ShippingMethodSerializer(serializers.ModelSerializer):
     class Meta:
         model = ShippingMethod
-        fields = ["id", "name", "method_type", "description", "min_delivery_days", "max_delivery_days"]
+        fields = ["id", "name", "name_ar", "method_type", "description", "min_delivery_days", "max_delivery_days"]
 
 
 class ShippingQuoteSerializer(serializers.Serializer):
     method_id = serializers.IntegerField(source="method.id")
     method_name = serializers.CharField(source="method.name")
+    # Arabic name for the storefront; "" when staff have not set one.
+    method_name_ar = serializers.CharField(source="method.name_ar")
     method_type = serializers.CharField(source="method.method_type")
     min_delivery_days = serializers.IntegerField(source="method.min_delivery_days")
     max_delivery_days = serializers.IntegerField(source="method.max_delivery_days")

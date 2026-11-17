@@ -21,6 +21,7 @@ from apps.categories.models import Category
 from apps.coupons.models import Coupon, CouponDiscountType
 from apps.inventory.models import Batch, InventoryItem
 from apps.promotions.models import Promotion, PromotionType
+from apps.shipping.defaults import ARABIC_NAMES
 from apps.shipping.models import (
     EGYPT_GOVERNORATES,
     Governorate,
@@ -83,10 +84,10 @@ class Command(BaseCommand):
         rest_of_egypt.governorates.set([g for code, g in governorates.items() if code not in ("cairo", "giza")])
 
         standard, _ = ShippingMethod.objects.get_or_create(
-            name="Standard Delivery", defaults={"method_type": ShippingMethodType.STANDARD, "min_delivery_days": 2, "max_delivery_days": 4}
+            name="Standard Delivery", defaults={"name_ar": ARABIC_NAMES["standard"], "method_type": ShippingMethodType.STANDARD, "min_delivery_days": 2, "max_delivery_days": 4}
         )
         express, _ = ShippingMethod.objects.get_or_create(
-            name="Express Delivery", defaults={"method_type": ShippingMethodType.EXPRESS, "min_delivery_days": 1, "max_delivery_days": 2}
+            name="Express Delivery", defaults={"name_ar": ARABIC_NAMES["express"], "method_type": ShippingMethodType.EXPRESS, "min_delivery_days": 1, "max_delivery_days": 2}
         )
 
         ShippingRate.objects.get_or_create(

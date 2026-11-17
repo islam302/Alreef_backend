@@ -194,11 +194,16 @@ class PhoneVerifyConfirmSerializer(serializers.Serializer):
 class AddressSerializer(serializers.ModelSerializer):
     governorate_name = serializers.CharField(source="governorate.name_en", read_only=True)
     city_name = serializers.CharField(source="city.name_en", read_only=True, default=None)
+    # The names the Arabic storefront shows; the English ones above are kept
+    # for existing consumers.
+    governorate_name_ar = serializers.CharField(source="governorate.name_ar", read_only=True)
+    city_name_ar = serializers.CharField(source="city.name_ar", read_only=True, default=None)
 
     class Meta:
         model = Address
         fields = [
-            "id", "label", "full_name", "phone", "governorate", "governorate_name", "city", "city_name",
+            "id", "label", "full_name", "phone", "governorate", "governorate_name", "governorate_name_ar",
+            "city", "city_name", "city_name_ar",
             "district", "street", "building", "floor", "apartment", "landmark", "postal_code", "notes",
             "is_default", "created_at", "updated_at",
         ]

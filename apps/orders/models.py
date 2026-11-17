@@ -76,6 +76,8 @@ class Order(BaseModel):
     customer_phone = models.CharField(max_length=32)
     shipping_address_snapshot = models.JSONField(default=dict)
     shipping_method_name = models.CharField(max_length=100, blank=True)
+    # The method's Arabic name at checkout, for the customer's order pages.
+    shipping_method_name_ar = models.CharField(max_length=100, blank=True)
 
     payment_method = models.CharField(max_length=20, choices=PaymentMethodSnapshot.choices)
 

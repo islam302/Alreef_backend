@@ -78,7 +78,8 @@ def generate_order_for_subscription(subscription: Subscription) -> SubscriptionS
                 "governorate_en": subscription.address.governorate.name_en,
                 "street": subscription.address.street, "building": subscription.address.building,
             },
-            shipping_method_name=subscription.shipping_method.name, payment_method=subscription.payment_method,
+            shipping_method_name=subscription.shipping_method.name,
+            shipping_method_name_ar=subscription.shipping_method.name_ar, payment_method=subscription.payment_method,
             subtotal=subtotal, tax_total=tax_total, shipping_total=quote.price, grand_total=grand_total,
             notes=f"Auto-generated from subscription '{subscription.name}'",
         )

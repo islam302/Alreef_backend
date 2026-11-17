@@ -21,6 +21,17 @@ METHOD_DEFAULTS = {
 }
 
 
+#: The Arabic name each kind of method gets when it has none (migration 0003,
+#: `seed_data`). Kept apart from METHOD_DEFAULTS: migration 0002 creates
+#: methods from that dict on a model that has no `name_ar` yet.
+ARABIC_NAMES = {
+    "standard": "توصيل عادي",
+    "express": "توصيل سريع",
+    "same_day": "توصيل في نفس اليوم",
+    "pickup": "استلام من الفرع",
+}
+
+
 def apply_default_fees(Governorate, ShippingZone, ShippingMethod, ShippingRate):
     """
     Make every active governorate offer Standard at 75 and Express at 100.
