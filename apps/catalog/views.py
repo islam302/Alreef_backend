@@ -1,8 +1,10 @@
 import logging
 
-from django.db.models import Q
+from django.db.models import Case, F, IntegerField, Q, Value, When
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions
+from rest_framework.filters import OrderingFilter, SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.views import APIView
 
@@ -26,18 +28,41 @@ def _published_products():
     )
 
 
+# The shop's own order: offers first, then what the shop marked best seller,
+# then its featured picks, then newest. `?ordering=recommended` asks for it by
+# name; it is also what the list returns when no ordering is given.
+RECOMMENDED_ORDERING = ["-offer_rank", "-best_rank", "-featured", "-created_at"]
+
+
+class StoreOrderingFilter(OrderingFilter):
+    def get_ordering(self, request, queryset, view):
+        if request.query_params.get(self.ordering_param, "").strip() == "recommended":
+            return RECOMMENDED_ORDERING
+        return super().get_ordering(request, queryset, view)
+
+
 @extend_schema(tags=["Products"])
 class ProductListView(ListAPIView):
     serializer_class = ProductListSerializer
     permission_classes = [permissions.AllowAny]
     filterset_class = ProductFilter
     search_fields = ["name_en", "name_ar", "sku", "barcode", "description"]
+    filter_backends = [DjangoFilterBackend, SearchFilter, StoreOrderingFilter]
     ordering_fields = ["price", "created_at", "name_en"]
-    ordering = ["-created_at"]
+    ordering = RECOMMENDED_ORDERING
     throttle_scope = "search"
 
     def get_queryset(self):
-        return _published_products()
+        return _published_products().annotate(
+            offer_rank=Case(
+                When(compare_at_price__isnull=False, price__lt=F("compare_at_price"), then=Value(1)),
+                default=Value(0), output_field=IntegerField(),
+            ),
+            best_rank=Case(
+                When(badges__contains=["BEST_SELLER"], then=Value(1)),
+                default=Value(0), output_field=IntegerField(),
+            ),
+        )
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
