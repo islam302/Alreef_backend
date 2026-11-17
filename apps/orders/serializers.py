@@ -76,6 +76,7 @@ def payment_summary(order):
         "instructions_ar": metadata.get("instructions_ar", ""),
         "pay_to": metadata.get("instapay_address") or metadata.get("wallet_number", ""),
         "pay_to_name": metadata.get("wallet_account_name") or metadata.get("instapay_account_name", ""),
+        "pay_link": metadata.get("instapay_link", ""),
         "pay_reference": metadata.get("transfer_reference", order.order_number),
         "role": metadata.get("role", ""),
         # The deposit, whichever payment is shown: how much, and whether it is in.

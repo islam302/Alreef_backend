@@ -143,6 +143,7 @@ class CheckoutCreateView(IdempotentRequestMixin, APIView):
             "instructions_ar": payment.metadata.get("instructions_ar", ""),
             "pay_to": payment.metadata.get("instapay_address") or payment.metadata.get("wallet_number", ""),
             "pay_to_name": payment.metadata.get("wallet_account_name") or payment.metadata.get("instapay_account_name", ""),
+            "pay_link": payment.metadata.get("instapay_link", ""),
             "pay_reference": payment.metadata.get("transfer_reference", order.order_number),
             # A COD deposit: this payment is the deposit, and the rest is paid
             # to the courier.

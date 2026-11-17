@@ -79,6 +79,10 @@ class InstaPayPaymentProvider(PaymentProvider):
         address = str(self.config["ADDRESS"]).strip()
         account_name = str(self.config.get("ACCOUNT_NAME") or "").strip()
         window_hours = int(self.config.get("CONFIRM_WINDOW_HOURS") or 24)
+        pay_link = str(self.config.get("PAY_LINK") or "").strip()
+        # Only an https link is ever handed to the storefront as a button.
+        if not pay_link.startswith("https://"):
+            pay_link = ""
 
         instructions = (
             f"احوّل {payment.amount.amount:.2f} ج.م على إنستاباي للعنوان: {address}"
@@ -98,6 +102,7 @@ class InstaPayPaymentProvider(PaymentProvider):
                 # payment address, not a credential.
                 "instapay_address": address,
                 "instapay_account_name": account_name,
+                "instapay_link": pay_link,
                 "transfer_amount": f"{payment.amount.amount:.2f}",
                 "currency": str(payment.amount.currency),
                 "transfer_reference": order.order_number,

@@ -577,6 +577,9 @@ PAYMENT_PROVIDERS = {
         # The account name the customer will see in their banking app, so a
         # cautious customer can check it matches before transferring.
         "ACCOUNT_NAME": config("INSTAPAY_ACCOUNT_NAME", default=""),
+        # Optional InstaPay payment link (https://ipn.eg/...): opens the
+        # customer's banking app on a transfer to ADDRESS. Shown as a button.
+        "PAY_LINK": config("INSTAPAY_PAY_LINK", default=""),
         # How long the order waits for the transfer before staff should chase it.
         "CONFIRM_WINDOW_HOURS": config("INSTAPAY_CONFIRM_WINDOW_HOURS", default=24, cast=int),
     },
