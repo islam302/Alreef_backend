@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # it rather than failing the send.
 EMAIL_SUBJECTS = {
     "order_confirmation": "طلبك اتأكد — رقم {order_number}",
+    "staff_new_order": "الحق في اوردر جديد — رقم {order_number}",
     "payment_confirmation": "وصلنا الدفع — طلب رقم {order_number}",
     "payment_failed": "الدفع ماكملش — طلب رقم {order_number}",
     "refund": "رجّعنالك فلوسك — طلب رقم {order_number}",

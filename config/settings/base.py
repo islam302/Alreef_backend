@@ -513,6 +513,9 @@ FACEBOOK_GRAPH_VERSION = config("FACEBOOK_GRAPH_VERSION", default="v21.0")
 # Storefront chat assistant (apps.chatbot), answered by the Zaychain RAG API.
 # The key is a secret: it lives only here and is never sent to the browser,
 # which talks to /api/v1/chat/ instead. Empty switches the assistant off.
+# Who at the shop gets an email the moment an order is placed (comma list).
+ORDER_ALERT_EMAILS = config("ORDER_ALERT_EMAILS", default="", cast=Csv())
+
 CHATBOT_API_URL = config("CHATBOT_API_URL", default="https://chatbot-api.zaychain.com/api/v1/chat/")
 CHATBOT_API_KEY = config("CHATBOT_API_KEY", default="")
 CHATBOT_TIMEOUT_SECONDS = config("CHATBOT_TIMEOUT_SECONDS", default=30, cast=int)

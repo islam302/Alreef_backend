@@ -587,3 +587,54 @@ def _refund_across_payments(order: Order, payments, amount: Money, *, reason: st
         remaining -= part
     return amount - remaining
 
+
+PAYMENT_LABELS_AR = {
+    "cod": "الدفع عند الاستلام",
+    "instapay": "إنستاباي",
+    "mobile_wallet": "فودافون كاش",
+    "vodafone_cash": "فودافون كاش",
+    "card": "بطاقة بنكية",
+}
+
+
+def alert_shop_new_order(order: Order) -> None:
+    """
+    Email the shop (settings.ORDER_ALERT_EMAILS) that an order was just placed,
+    with what someone needs to act on it: who, where, what, how much, how it is
+    paid, and a link to it in the dashboard. Sent after commit, like every
+    email, so a checkout that rolls back alerts nobody.
+    """
+    from django.conf import settings
+
+    from apps.notifications.services import queue_email
+
+    recipients = [e.strip() for e in getattr(settings, "ORDER_ALERT_EMAILS", []) if e and e.strip()]
+    if not recipients:
+        return
+    address = order.shipping_address_snapshot or {}
+    place = " — ".join(p for p in (address.get("governorate"), address.get("city")) if p)
+    items = [
+        {
+            "name": " ".join(p for p in (item.product_name_snapshot, item.variant_name_snapshot) if p),
+            "quantity": item.quantity,
+            "total": format_money(item.line_total.amount, order.currency),
+        }
+        for item in order.items.all()
+    ]
+    context = {
+        "order_number": order.order_number,
+        "customer_name": order.customer_name,
+        "customer_phone": order.customer_phone,
+        "place": place,
+        "items": items,
+        "total": format_money(order.grand_total.amount, order.currency),
+        "payment": PAYMENT_LABELS_AR.get(order.payment_method, order.payment_method),
+        "notes": order.notes,
+        "is_guest": not order.user_id,
+        "dashboard_url": f"{settings.FRONTEND_URL.rstrip('/')}/admin-panel/orders/{order.order_number}",
+    }
+    for to in recipients:
+        queue_email(
+            to=to, subject="staff_new_order", template_name="staff_new_order",
+            context=context, event="staff_new_order",
+        )

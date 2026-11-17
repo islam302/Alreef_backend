@@ -1,0 +1,14 @@
+{% extends "emails/_base.html" %}
+{% block content %}
+<h2 style="margin:0 0 12px;color:#174b3a;">الحق، في اوردر جديد</h2>
+<p style="margin:0;">رقم الطلب: <strong dir="ltr" style="unicode-bidi:embed;">{{ order_number }}</strong>{% if is_guest %} <span style="color:#6b7a73;">(ضيف)</span>{% endif %}</p>
+<p style="margin:0;">العميل: <strong>{{ customer_name }}</strong> — <span dir="ltr" style="unicode-bidi:embed;">{{ customer_phone }}</span></p>
+{% if place %}<p style="margin:0;">المكان: {{ place }}</p>{% endif %}
+<p style="margin:0;">الدفع: {{ payment }}</p>
+<table role="presentation" style="width:100%;border-collapse:collapse;margin:16px 0;">
+{% for item in items %}<tr><td style="padding:6px 0;border-bottom:1px solid #eee;">{{ item.quantity }} × {{ item.name }}</td><td style="padding:6px 0;border-bottom:1px solid #eee;text-align:left;white-space:nowrap;">{{ item.total }}</td></tr>{% endfor %}
+</table>
+<p style="margin:0;font-size:18px;">الإجمالي: <strong>{{ total }}</strong></p>
+{% if notes %}<p style="margin:12px 0 0;color:#6b7a73;">ملاحظات العميل: {{ notes }}</p>{% endif %}
+<p style="margin:24px 0;"><a href="{{ dashboard_url }}" style="display:inline-block;background:#174b3a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;">افتح الطلب في لوحة التحكم</a></p>
+{% endblock %}

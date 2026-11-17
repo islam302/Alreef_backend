@@ -353,3 +353,39 @@ def test_phone_otp_says_unavailable_when_no_sms_would_arrive(settings, authentic
 def test_production_settings_declare_the_console_sms_provider_undeliverable():
     source = open("config/settings/production.py", encoding="utf-8").read()
     assert "SMS_CONSOLE_IS_DELIVERY = False" in source
+
+
+# ---------------------------------------------------------------------------
+# The shop hears about every new order
+# ---------------------------------------------------------------------------
+
+
+def test_the_shop_gets_a_new_order_email(
+    authenticated_client, product_with_variant_and_stock, address, shipping_setup,
+    django_capture_on_commit_callbacks, settings,
+):
+    settings.ORDER_ALERT_EMAILS = ["owner@shop.test", "  "]
+    settings.FRONTEND_URL = "https://shop.test"
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _checkout(authenticated_client, product_with_variant_and_stock["variant"], address, shipping_setup)
+    number = response.json()["data"]["order"]["order_number"]
+
+    to_shop = [m for m in mail.outbox if m.to == ["owner@shop.test"]]
+    assert len(to_shop) == 1
+    message = to_shop[0]
+    assert message.subject == f"الحق في اوردر جديد — رقم {number}"
+    html = message.alternatives[0][0]
+    assert f"https://shop.test/admin-panel/orders/{number}" in html
+    assert "×" in html and "ج.م" in html
+    # The customer still gets exactly their own confirmation.
+    assert len([m for m in mail.outbox if m.to != ["owner@shop.test"]]) == 1
+
+
+def test_no_alert_address_sends_nothing_extra(
+    authenticated_client, product_with_variant_and_stock, address, shipping_setup,
+    django_capture_on_commit_callbacks, settings,
+):
+    settings.ORDER_ALERT_EMAILS = []
+    with django_capture_on_commit_callbacks(execute=True):
+        _checkout(authenticated_client, product_with_variant_and_stock["variant"], address, shipping_setup)
+    assert all("اوردر جديد" not in m.subject for m in mail.outbox)

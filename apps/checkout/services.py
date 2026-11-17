@@ -438,6 +438,9 @@ def create_order_from_cart(
     cart.status = CartStatus.CONVERTED
     cart.save(update_fields=["status"])
 
+    from apps.orders.services import alert_shop_new_order
+    alert_shop_new_order(order)
+
     if payment_method == PaymentMethodSnapshot.COD and totals.deposit is not None:
         # The order waits, pending, for its deposit. Staff confirm the transfer
         # in the dashboard (record_manual_receipt), and that confirms the order.
