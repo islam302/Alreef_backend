@@ -11,6 +11,8 @@ from unittest import mock
 import pytest
 import requests
 
+pytestmark = pytest.mark.django_db  # the dashboard switch lives in SiteSettings
+
 CHAT = "/api/v1/chat/"
 KEY = "test-chat-key"
 
@@ -164,3 +166,19 @@ def test_throttled_after_budget(api_client, chat_settings):
         codes = [api_client.post(CHAT, {"question": "q"}, format="json").status_code for _ in range(13)]
     assert codes[:12] == [200] * 12
     assert codes[12] == 429
+
+
+def test_switched_off_in_the_dashboard_refuses_without_calling_the_provider(api_client, chat_settings, staff_client):
+    """Site settings → chatbot_enabled=False hides the button on the storefront
+    and the proxy refuses too, so a stale tab can't keep spending credits."""
+    from apps.content.models import SiteSettings
+
+    s = SiteSettings.load()
+    s.chatbot_enabled = False
+    s.save()
+    assert api_client.get("/api/v1/content/site/").json()["data"]["settings"]["chatbot_enabled"] is False
+
+    with fake_upstream(200, UPSTREAM_REPLY) as post:
+        r = api_client.post(CHAT, {"question": "عندكم عسل سدر؟", "history": []}, format="json")
+    assert r.json()["errors"]["code"] == "CHAT_DISABLED"
+    post.assert_not_called()

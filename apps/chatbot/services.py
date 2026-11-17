@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 def ask(question, history):
     """Forward one question with its recent history → the assistant's answer."""
-    if not settings.CHATBOT_API_KEY:
+    from apps.content.models import SiteSettings
+
+    if not settings.CHATBOT_API_KEY or not SiteSettings.load().chatbot_enabled:
         raise ApplicationError(ErrorCodes.CHAT_DISABLED, "The chat assistant is not enabled.")
 
     try:

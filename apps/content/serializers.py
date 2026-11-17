@@ -51,6 +51,7 @@ class SiteSettingsSerializer(serializers.ModelSerializer):
             "founded_year", "site_url", "logo", "og_image",
             "email", "support_hours_ar",
             "announcement_enabled", "announcement_text_ar", "announcement_url",
+            "chatbot_enabled",
             "meta_title_ar", "meta_description_ar", "updated_at",
         ]
 

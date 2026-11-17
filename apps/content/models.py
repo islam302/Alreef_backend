@@ -76,6 +76,12 @@ class SiteSettings(BaseModel):
     announcement_text_ar = models.CharField(max_length=240, blank=True, validators=[validate_no_unsafe_html])
     announcement_url = models.CharField(max_length=255, blank=True, help_text="Path or absolute URL. Optional.")
 
+    # --- Chat assistant ---------------------------------------------------
+    chatbot_enabled = models.BooleanField(
+        default=True,
+        help_text="Show the chat assistant button on the storefront. Off hides it and refuses /chat/.",
+    )
+
     # --- Default SEO ------------------------------------------------------
     meta_title_ar = models.CharField(max_length=180, blank=True)
     meta_description_ar = models.CharField(max_length=320, blank=True)
