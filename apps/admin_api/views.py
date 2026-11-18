@@ -75,6 +75,7 @@ from apps.inventory.models import Batch, InventoryItem, InventoryMovement
 from apps.inventory.services import get_expired_batches, get_or_create_item
 from apps.orders.models import Order, OrderStatus, ReturnRequest
 from apps.orders.services import change_status_by_staff, complete_return_and_refund, decide_return_request
+from apps.orders.selectors import units_sold_subquery
 from apps.payments.models import Payment
 from apps.reviews.models import ChatScreenshot, Review, StoreReview
 from apps.shipping.models import Governorate, ShippingMethod, ShippingRate, ShippingZone
@@ -285,7 +286,7 @@ class AdminProductViewSet(EnvelopeViewSet):
     audit_model_name = "Product"
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name_ar", "name_en", "sku", "barcode"]
-    ordering_fields = ["created_at", "price", "name_ar"]
+    ordering_fields = ["created_at", "price", "name_ar", "units_sold"]
     ordering = ["-created_at"]
 
     def get_queryset(self):
@@ -303,7 +304,7 @@ class AdminProductViewSet(EnvelopeViewSet):
                 # serializer totals that are already computed.
                 Prefetch("variants__inventory_item", queryset=InventoryItem.objects.with_stock()),
             )
-            .annotate(variant_count=Count("variants", distinct=True))
+            .annotate(variant_count=Count("variants", distinct=True), units_sold=units_sold_subquery())
         )
         params = self.request.query_params
 

@@ -82,6 +82,12 @@ class SiteSettings(BaseModel):
         help_text="Show the chat assistant button on the storefront. Off hides it and refuses /chat/.",
     )
 
+    # --- Units sold on the storefront ------------------------------------
+    sold_count_min = models.PositiveIntegerField(
+        default=10,
+        help_text="Show the units-sold line on a product once it reaches this. 0 never shows it.",
+    )
+
     # --- Default SEO ------------------------------------------------------
     meta_title_ar = models.CharField(max_length=180, blank=True)
     meta_description_ar = models.CharField(max_length=320, blank=True)

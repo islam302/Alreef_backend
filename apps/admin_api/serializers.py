@@ -366,13 +366,16 @@ class AdminProductListSerializer(serializers.ModelSerializer):
     primary_image = serializers.SerializerMethodField()
     stock_state = serializers.SerializerMethodField()
     variant_count = serializers.IntegerField(read_only=True, default=0)
+    # Jars sold, every order except cancelled / returned / refunded. The real
+    # number, whatever the storefront's threshold.
+    units_sold = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = Product
         fields = [
             "id", "name_ar", "name_en", "slug", "sku", "status", "published", "featured",
             "price", "compare_at_price", "category", "category_name", "brand_name",
-            "primary_image", "stock_state", "variant_count", "created_at",
+            "primary_image", "stock_state", "variant_count", "units_sold", "created_at",
         ]
 
     def get_primary_image(self, obj) -> str | None:

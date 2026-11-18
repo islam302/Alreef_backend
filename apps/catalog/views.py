@@ -14,6 +14,7 @@ from apps.catalog.serializers import ProductDetailSerializer, ProductListSeriali
 from apps.core.error_codes import ApplicationError, ErrorCodes
 from apps.core.response import success_response
 from apps.core.schema import envelope
+from apps.orders.selectors import units_sold_subquery
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ def _published_products():
         Product.objects.filter(status=ProductStatus.ACTIVE, published=True)
         .select_related("brand", "category")
         .prefetch_related(*PRODUCT_LIST_PREFETCH)
+        .annotate(units_sold=units_sold_subquery())
     )
 
 

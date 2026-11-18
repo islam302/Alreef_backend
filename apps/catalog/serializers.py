@@ -64,6 +64,28 @@ def _primary(product):
     return next((i for i in images if i.is_primary), None) or next(iter(images), None)
 
 
+def _sold_count_min(context):
+    """The shop's threshold, read once per response (a list shares one context)."""
+    if "_sold_count_min" not in context:
+        from apps.content.models import SiteSettings
+
+        context["_sold_count_min"] = SiteSettings.load().sold_count_min
+    return context["_sold_count_min"]
+
+
+def public_sold_count(obj, context):
+    """
+    Jars sold, for the storefront's units-sold line: only once it reaches the
+    shop's threshold (a "sold 2" line does more harm than none), and only
+    where the view annotated `units_sold`. Otherwise None and nothing shows.
+    """
+    sold = getattr(obj, "units_sold", None)
+    minimum = _sold_count_min(context)
+    if sold is None or not minimum or sold < minimum:
+        return None
+    return sold
+
+
 class ProductListSerializer(serializers.ModelSerializer):
     brand = BrandSerializer(read_only=True)
     category = CategoryListSerializer(read_only=True)
@@ -71,14 +93,19 @@ class ProductListSerializer(serializers.ModelSerializer):
     secondary_image = serializers.SerializerMethodField()
     computed_badges = serializers.SerializerMethodField()
     in_stock = serializers.SerializerMethodField()
+    sold_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
             "id", "name_en", "name_ar", "slug", "short_description", "brand", "category",
             "price", "compare_at_price", "product_type", "badges", "computed_badges",
-            "primary_image", "secondary_image", "in_stock", "featured",
+            "primary_image", "secondary_image", "in_stock", "featured", "sold_count",
         ]
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_sold_count(self, obj):
+        return public_sold_count(obj, self.context)
 
     def get_primary_image(self, obj):
         image = _primary(obj)
@@ -133,6 +160,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     attributes = AttributeValueSerializer(source="attribute_values", many=True, read_only=True)
     bundle_items = BundleItemSerializer(many=True, read_only=True)
     computed_badges = serializers.SerializerMethodField()
+    sold_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -141,7 +169,12 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "brand", "category", "product_type", "price", "compare_at_price", "tax_category",
             "weight_grams", "packaging_type", "badges", "computed_badges", "food_metadata", "honey_metadata",
             "images", "videos", "variants", "attributes", "bundle_items", "seo_title", "seo_description",
+            "sold_count",
         ]
 
     def get_computed_badges(self, obj):
         return ProductListSerializer().get_computed_badges(obj)
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_sold_count(self, obj):
+        return public_sold_count(obj, self.context)
