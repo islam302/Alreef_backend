@@ -206,8 +206,8 @@ def expected_outcome(frm, to, route):
         return (200, None) if frm in CANCELLABLE else (409, "ORDER_CANNOT_CANCEL")
     if to not in ORDER_STATUS_TRANSITIONS[frm]:
         return 409, "ORDER_INVALID_TRANSITION"
-    if to == OrderStatus.CONFIRMED and route != "cod":
-        return 409, "ORDER_PAYMENT_NOT_SETTLED"  # confirm-before-paid is refused
+    # Every route here is cash or a manual transfer: confirming a transfer or
+    # deposit order records its money as received (see the gate tests below).
     return 200, None
 
 
@@ -241,6 +241,8 @@ def test_every_staff_status_change_from_every_status(settings, world, staff_clie
                     elif to == OrderStatus.CONFIRMED:
                         assert set(StockReservation.objects.filter(order=order).values_list("status", flat=True)) == {
                             StockReservationStatus.CONSUMED}
+                        if transfer_payment(order) is not None:
+                            assert transfer_payment(order).status == PaymentStatus.CAPTURED
                 else:
                     assert snapshot(order) == before  # a refusal changes nothing
                 raise _Rollback
@@ -275,12 +277,10 @@ def test_a_customer_cannot_use_the_staff_status_endpoint(settings, world, route)
 
 @pytest.mark.parametrize("route", [r for r in ROUTES if r != "cod"])
 @pytest.mark.parametrize("payment_state", ["requires_action", "failed", "cancelled", "expired"])
-def test_an_unpaid_transfer_or_deposit_order_can_never_be_confirmed_or_shipped(settings, world, staff_client, route, payment_state):
+def test_an_unpaid_transfer_or_deposit_order_can_never_skip_to_fulfilment(settings, world, staff_client, route, payment_state):
     order, _ = place(settings, world, route)
     Payment.objects.filter(pk=transfer_payment(order).pk).update(status=payment_state)
     url = f"{w.API}/admin-api/orders/{order.order_number}/status/"
-    response = staff_client.post(url, {"status": "confirmed"}, format="json")
-    assert (response.status_code, response.json()["errors"]["code"]) == (409, "ORDER_PAYMENT_NOT_SETTLED")
     for later in FULFILMENT:
         response = staff_client.post(url, {"status": later}, format="json")
         assert response.status_code == 409, (later, response.content)
@@ -291,6 +291,24 @@ def test_an_unpaid_transfer_or_deposit_order_can_never_be_confirmed_or_shipped(s
     if cod_payment(order) is not None:
         response = staff_client.post(f"{w.API}/admin-api/payments/{cod_payment(order).id}/settle/", {"outcome": "received"}, format="json")
         assert response.status_code == 409
+
+
+@pytest.mark.parametrize("route", [r for r in ROUTES if r != "cod"])
+@pytest.mark.parametrize("payment_state", ["requires_action", "failed", "cancelled", "expired"])
+def test_confirming_from_the_order_records_the_transfer_whatever_its_state(settings, world, staff_client, route, payment_state):
+    order, _ = place(settings, world, route)
+    Payment.objects.filter(pk=transfer_payment(order).pk).update(status=payment_state)
+    url = f"{w.API}/admin-api/orders/{order.order_number}/status/"
+    response = staff_client.post(url, {"status": "confirmed"}, format="json")
+    assert response.status_code == 200, response.content
+    order.refresh_from_db()
+    assert order.status == OrderStatus.CONFIRMED
+    assert transfer_payment(order).status == PaymentStatus.CAPTURED
+    assert order.payments.filter(status=PaymentStatus.CAPTURED).count() == 1
+    assert set(StockReservation.objects.filter(order=order).values_list("status", flat=True)) == {
+        StockReservationStatus.CONSUMED}
+    # Cash for a deposit order is still collected at the door.
+    assert cod_payment(order) is None or cod_payment(order).status == PaymentStatus.PENDING
 
 
 @pytest.mark.parametrize("route", [r for r in ROUTES if r != "cod"])

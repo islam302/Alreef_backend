@@ -59,30 +59,60 @@ def _deliver(order):
 
 
 # ---------------------------------------------------------------------------
-# 1. An unpaid transfer / deposit order cannot be confirmed by hand
+# 1. Confirming an unpaid transfer / deposit order from the order records the
+#    money as received (the payments screen is a record, not a required step).
+#    It can still never skip confirmation, and a card payment is never settled
+#    by hand.
 # ---------------------------------------------------------------------------
 
 
-def test_staff_cannot_confirm_an_unpaid_transfer_order(instapay_on, staff_client, product_with_variant_and_stock, governorate, shipping_setup):
+def test_staff_confirming_a_transfer_order_records_the_transfer(instapay_on, staff_client, product_with_variant_and_stock, governorate, shipping_setup):
     order, payment = _transfer_order(product_with_variant_and_stock, governorate, shipping_setup)
 
     response = _set_status(staff_client, order, "confirmed")
-    assert response.status_code == 409, response.content
-    assert response.json()["errors"]["code"] == "ORDER_PAYMENT_NOT_SETTLED"
+    assert response.status_code == 200, response.content
     order.refresh_from_db()
-    assert order.status == OrderStatus.PENDING
+    payment.refresh_from_db()
+    assert order.status == OrderStatus.CONFIRMED
+    assert payment.status == PaymentStatus.CAPTURED
+    assert set(StockReservation.objects.filter(order=order).values_list("status", flat=True)) == {
+        StockReservationStatus.CONSUMED}
 
-    # Recording the transfer is what confirms it.
+    # Settling it afterwards from the payments screen changes nothing.
     assert _settle(staff_client, payment).status_code == 200
+    assert Payment.objects.filter(order=order, status=PaymentStatus.CAPTURED).count() == 1
+
+
+def test_staff_confirming_a_cod_order_records_its_deposit_not_the_cash(deposit_on, staff_client, product_with_variant_and_stock, governorate, shipping_setup):  # noqa: F811
+    order, _, _ = _cod_order(product_with_variant_and_stock, governorate, shipping_setup)
+    response = _set_status(staff_client, order, "confirmed")
+    assert response.status_code == 200, response.content
     order.refresh_from_db()
     assert order.status == OrderStatus.CONFIRMED
+    assert order.payments.exclude(provider="cod").get().status == PaymentStatus.CAPTURED
+    # The rest is cash at the door: still to collect on delivery.
+    assert order.payments.get(provider="cod").status == PaymentStatus.PENDING
 
 
-def test_staff_cannot_confirm_a_cod_order_waiting_for_its_deposit(deposit_on, staff_client, product_with_variant_and_stock, governorate, shipping_setup):  # noqa: F811
-    order, _, _ = _cod_order(product_with_variant_and_stock, governorate, shipping_setup)
+def test_an_unpaid_transfer_order_cannot_skip_confirmation(instapay_on, staff_client, product_with_variant_and_stock, governorate, shipping_setup):
+    order, payment = _transfer_order(product_with_variant_and_stock, governorate, shipping_setup)
+    response = _set_status(staff_client, order, "processing")
+    assert response.status_code == 409
+    payment.refresh_from_db()
+    assert payment.status != PaymentStatus.CAPTURED
+
+
+def test_a_card_payment_is_never_settled_by_confirming(instapay_on, staff_client, product_with_variant_and_stock, governorate, shipping_setup):
+    order, payment = _transfer_order(product_with_variant_and_stock, governorate, shipping_setup)
+    Payment.objects.filter(pk=payment.pk).update(provider="paymob")
+
     response = _set_status(staff_client, order, "confirmed")
     assert response.status_code == 409
     assert response.json()["errors"]["code"] == "ORDER_PAYMENT_NOT_SETTLED"
+    payment.refresh_from_db()
+    order.refresh_from_db()
+    assert payment.status != PaymentStatus.CAPTURED
+    assert order.status == OrderStatus.PENDING
 
 
 # ---------------------------------------------------------------------------

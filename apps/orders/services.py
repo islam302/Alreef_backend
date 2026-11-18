@@ -196,7 +196,50 @@ def change_status_by_staff(order: Order, new_status: str, *, changed_by=None, no
         )
     if new_status == OrderStatus.CANCELLED:
         return cancel_order(order, reason=note or "Cancelled by staff.", cancelled_by=changed_by)
+    if new_status == OrderStatus.CONFIRMED:
+        confirmed = _confirm_with_transfer_received(order, changed_by=changed_by, note=note)
+        if confirmed is not None:
+            return confirmed
     return transition_status(order, new_status, changed_by=changed_by, note=note)
+
+
+@transaction.atomic
+def _confirm_with_transfer_received(order: Order, *, changed_by=None, note: str = ""):
+    """
+    Staff confirming an order whose InstaPay / Vodafone Cash transfer (or COD
+    deposit) has not been recorded yet: confirming from the order says the
+    money came. The transfer is recorded as received, exactly as the payments
+    screen's «وصل» button does (same audit, same confirmation emails), and that
+    confirms the order. The payments screen is then a record, not a step.
+
+    Returns None when there is nothing to record — plain COD, a payment already
+    settled — and the plain transition runs. A card payment is never settled by
+    hand: it is left to the gateway, and the confirmation guard refuses it.
+    """
+    from apps.payments import state as payment_state
+    from apps.payments.models import PaymentStatus
+    from apps.payments.services import LATE_RECEIPT_ROUTES, record_manual_receipt
+
+    if order.status != OrderStatus.PENDING:
+        return None
+    non_cash = order.payments.exclude(provider="cod")
+    paid = payment_state.SETTLED | {PaymentStatus.AUTHORIZED}
+    if not non_cash.exists() or non_cash.filter(status__in=paid).exists():
+        return None
+    transfer = non_cash.filter(provider__in=LATE_RECEIPT_ROUTES).order_by("-created_at").first()
+    if transfer is None:
+        return None
+
+    record_manual_receipt(
+        transfer, actor=changed_by,
+        note=f"Received — confirmed from the order page{': ' + note if note else ''}",
+    )
+    order.refresh_from_db()
+    if order.status == OrderStatus.PENDING:
+        # The capture did not move it (it normally does); the money is now
+        # recorded, so the plain transition passes the payment guard.
+        return transition_status(order, OrderStatus.CONFIRMED, changed_by=changed_by, note=note)
+    return order
 
 
 @transaction.atomic
