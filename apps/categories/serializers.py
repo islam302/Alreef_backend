@@ -6,7 +6,9 @@ from apps.categories.models import Category
 class CategoryListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ["id", "name_en", "name_ar", "slug", "image", "icon", "parent"]
+        # seo_title / seo_description: the storefront's category pages read
+        # them from this list (Alreef_front/src/api/adapt.js adaptCategory).
+        fields = ["id", "name_en", "name_ar", "slug", "image", "icon", "parent", "seo_title", "seo_description"]
 
 
 class CategoryTreeSerializer(serializers.ModelSerializer):

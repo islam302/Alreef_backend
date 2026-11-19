@@ -1,5 +1,7 @@
 from django.urls import path
 
+from apps.catalog.feeds import google_merchant_feed
+
 from apps.catalog.views import (
     ProductDetailView,
     ProductListView,
@@ -14,4 +16,5 @@ urlpatterns = [
     path("products/recently-viewed/", RecentlyViewedView.as_view(), name="recently-viewed"),
     path("products/<slug:slug>/", ProductDetailView.as_view(), name="detail"),
     path("products/<slug:slug>/related/", RelatedProductsView.as_view(), name="related"),
+    path("feeds/google-merchant.xml", google_merchant_feed, name="google-merchant-feed"),
 ]

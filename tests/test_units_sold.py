@@ -121,3 +121,24 @@ def test_storefront_can_sort_by_best_sellers(api_client, user, sold, category, b
     _order(user, newer, variant, 1)
     rows = api_client.get("/api/v1/products/", {"ordering": "-units_sold"}).json()["data"]["results"]
     assert [r["slug"] for r in rows] == [sold.slug, newer.slug]
+
+
+def test_best_sellers_shelf_lists_sold_products_first_then_marked_ones(api_client, user, sold, category, brand):
+    from apps.catalog.models import Product, ProductStatus, ProductType
+
+    marked = Product.objects.create(
+        name_en="Marked", name_ar="عسل مميز", slug="marked-honey", sku="HONEY-MARKED-001",
+        category=category, brand=brand, product_type=ProductType.SIMPLE,
+        status=ProductStatus.ACTIVE, published=True, price=Decimal("300.00"), badges=["BEST_SELLER"],
+    )
+    newer, variant = _second_product(category, brand)
+    _order(user, newer, variant, 1)
+    _second = Product.objects.create(  # never sold, not marked: stays off the shelf
+        name_en="Quiet", name_ar="عسل هادي", slug="quiet-honey", sku="HONEY-QUIET-001",
+        category=category, brand=brand, product_type=ProductType.SIMPLE,
+        status=ProductStatus.ACTIVE, published=True, price=Decimal("150.00"),
+    )
+    rows = api_client.get(
+        "/api/v1/products/", {"best_sellers": "true", "ordering": "-units_sold"}
+    ).json()["data"]["results"]
+    assert [r["slug"] for r in rows] == [sold.slug, newer.slug, marked.slug]
