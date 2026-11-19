@@ -40,7 +40,11 @@ class StoreOrderingFilter(OrderingFilter):
     def get_ordering(self, request, queryset, view):
         if request.query_params.get(self.ordering_param, "").strip() == "recommended":
             return RECOMMENDED_ORDERING
-        return super().get_ordering(request, queryset, view)
+        ordering = super().get_ordering(request, queryset, view)
+        if ordering and any(field.lstrip("-") == "units_sold" for field in ordering):
+            # Best sellers; products that sold the same keep the shop's own order.
+            ordering = [*ordering, *RECOMMENDED_ORDERING, "-pk"]
+        return ordering
 
 
 @extend_schema(tags=["Products"])
@@ -50,7 +54,7 @@ class ProductListView(ListAPIView):
     filterset_class = ProductFilter
     search_fields = ["name_en", "name_ar", "sku", "barcode", "description"]
     filter_backends = [DjangoFilterBackend, SearchFilter, StoreOrderingFilter]
-    ordering_fields = ["price", "created_at", "name_en"]
+    ordering_fields = ["price", "created_at", "name_en", "units_sold"]
     ordering = RECOMMENDED_ORDERING
 
     # Browsing the shelves (home sections, a category, the shop page) is a

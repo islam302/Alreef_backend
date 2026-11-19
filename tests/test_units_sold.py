@@ -91,3 +91,33 @@ def test_staff_can_set_the_threshold(staff_client):
     response = staff_client.patch("/api/v1/admin-api/site-settings/", {"sold_count_min": 25}, format="json")
     assert response.status_code == 200, response.content
     assert SiteSettings.load().sold_count_min == 25
+
+
+def _second_product(category, brand):
+    from apps.catalog.models import Product, ProductStatus, ProductType, ProductVariant
+
+    product = Product.objects.create(
+        name_en="Clover Honey", name_ar="عسل البرسيم", slug="clover-honey", sku="HONEY-CLOVER-001",
+        category=category, brand=brand, product_type=ProductType.SIMPLE,
+        status=ProductStatus.ACTIVE, published=True, price=Decimal("200.00"),
+    )
+    variant = ProductVariant.objects.create(
+        product=product, sku="HONEY-CLOVER-001-500G", name_suffix="500g",
+        price=Decimal("200.00"), is_active=True, is_default=True,
+    )
+    return product, variant
+
+
+def test_dashboard_lists_best_sellers_first_by_default(staff_client, user, sold, category, brand):
+    newer, variant = _second_product(category, brand)  # newer, but sold less
+    _order(user, newer, variant, 1)
+    rows = staff_client.get("/api/v1/admin-api/products/").json()["data"]["results"]
+    assert [r["slug"] for r in rows] == [sold.slug, newer.slug]
+    assert [r["units_sold"] for r in rows] == [9, 1]
+
+
+def test_storefront_can_sort_by_best_sellers(api_client, user, sold, category, brand):
+    newer, variant = _second_product(category, brand)
+    _order(user, newer, variant, 1)
+    rows = api_client.get("/api/v1/products/", {"ordering": "-units_sold"}).json()["data"]["results"]
+    assert [r["slug"] for r in rows] == [sold.slug, newer.slug]

@@ -279,15 +279,28 @@ class AdminReturnViewSet(ReadOnlyEnvelopeViewSet):
 # ==========================================================================
 # Catalog
 # ==========================================================================
+class StableOrderingFilter(filters.OrderingFilter):
+    """Ties (two products that sold the same) fall back to newest first, so a
+    page never shows the same product twice or skips one."""
+
+    def get_ordering(self, request, queryset, view):
+        ordering = list(super().get_ordering(request, queryset, view) or [])
+        if not any(field.lstrip("-") == "created_at" for field in ordering):
+            ordering.append("-created_at")
+        ordering.append("-pk")
+        return ordering
+
+
 @extend_schema(tags=["Admin"])
 class AdminProductViewSet(EnvelopeViewSet):
     serializer_class = AdminProductSerializer
     list_serializer_class = AdminProductListSerializer
     audit_model_name = "Product"
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [filters.SearchFilter, StableOrderingFilter]
     search_fields = ["name_ar", "name_en", "sku", "barcode"]
     ordering_fields = ["created_at", "price", "name_ar", "units_sold"]
-    ordering = ["-created_at"]
+    # Best sellers first: the jars-sold count is what the shop looks at.
+    ordering = ["-units_sold"]
 
     def get_queryset(self):
         queryset = (
